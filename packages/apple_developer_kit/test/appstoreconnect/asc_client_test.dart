@@ -39,6 +39,44 @@ void main() {
     'attributes': {'identifier': identifier, 'name': identifier},
   };
 
+  test('createProfile sends App Store type without devices', () async {
+    final client = AscClient(
+      credentials,
+      httpClient: MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/v1/profiles');
+
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final data = body['data'] as Map<String, dynamic>;
+        final attributes = data['attributes'] as Map<String, dynamic>;
+        final relationships = data['relationships'] as Map<String, dynamic>;
+
+        expect(attributes['profileType'], 'IOS_APP_STORE');
+        expect(relationships.containsKey('devices'), isFalse);
+
+        return http.Response(
+          jsonEncode({
+            'data': {
+              'id': 'profile-1',
+              'attributes': {'profileContent': 'AQID'},
+            },
+          }),
+          201,
+        );
+      }),
+    );
+    addTearDown(client.close);
+
+    final profile = await client.createProfile(
+      name: 'Distribution',
+      bundleIdResourceId: 'bundle-1',
+      certificateResourceIds: ['cert-1'],
+      deviceResourceIds: [],
+      profileType: 'IOS_APP_STORE',
+    );
+
+    expect(profile.id, 'profile-1');
+  });
   group('findBundleId', () {
     test('picks the exact match out of a prefix-matched page', () async {
       // Apple treats filter[identifier] as a prefix match, so an app's query

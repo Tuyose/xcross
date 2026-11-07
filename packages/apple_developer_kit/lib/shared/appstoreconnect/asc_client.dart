@@ -301,6 +301,7 @@ final class AscClient implements DevelopmentProvisioningClient {
     required String bundleIdResourceId,
     required List<String> certificateResourceIds,
     required List<String> deviceResourceIds,
+    String profileType = 'IOS_APP_DEVELOPMENT',
   }) async => AscProfile.fromJson(
     _data(
       await _post(
@@ -310,6 +311,7 @@ final class AscClient implements DevelopmentProvisioningClient {
           bundleIdResourceId: bundleIdResourceId,
           certificateResourceIds: certificateResourceIds,
           deviceResourceIds: deviceResourceIds,
+          profileType: profileType,
         ),
       ),
     ),
