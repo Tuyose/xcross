@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
 import 'package:cli_kit/shared/platform/platform_host.dart';
@@ -38,8 +37,12 @@ final class IpaPackager {
 
     final archive = Archive();
     // list() follows symlinks by default → they resolve to real files/dirs.
-    await for (final entity in appDir.list(recursive: true)) {
-      if (entity is! File) continue; // dirs are implicit from entry paths
+    final files = <File>[
+      await for (final entity in appDir.list(recursive: true))
+        if (entity is File) entity,
+    ]..sort((a, b) => a.path.compareTo(b.path));
+
+    for (final entity in files) {
       final rel = paths.relative(entity.path, from: appDir.path);
       final entryName = p.posix.joinAll([
         'Payload',
@@ -49,22 +52,7 @@ final class IpaPackager {
       final bytes = await entity.readAsBytes();
       final file = ArchiveFile.bytes(entryName, bytes);
 
-      // Windows does not report POSIX executable bits for Mach-O files.
-      // Recognize Mach-O headers and store executable ZIP permissions.
-      final isMachO =
-          bytes.length >= 4 &&
-          const <int>{
-            0xCAFE_BABE,
-            0xBEBA_FECA,
-            0xFEED_FACE,
-            0xCEFA_EDFE,
-            0xFEED_FACF,
-            0xCFFA_EDFE,
-          }.contains(ByteData.sublistView(bytes).getUint32(0, Endian.little));
-
-      file.mode = isMachO
-          ? 0x1ED // Unix 0755: executable, not world-writable.
-          : entity.statSync().mode & 0xFFF;
+      file.mode = entryMode(entity.statSync().mode, bytes);
       archive.addFile(file);
     }
 
@@ -120,5 +108,30 @@ final class IpaPackager {
     }
 
     return ipaPath;
+  }
+
+  /// Unix mode recorded for an IPA entry.
+  ///
+  /// Windows `stat` has no exec bit (and reports `0666`-style modes), so a
+  /// Mach-O main executable or framework binary would land in the IPA
+  /// non-executable and installd would refuse to launch it. Mach-O files are
+  /// therefore always `0755`; other files keep their host mode, falling back
+  /// to `0644` when the host reports none.
+  @visibleForTesting
+  static int entryMode(int statMode, List<int> bytes) {
+    if (_isMachO(bytes)) return 0x1ED; // 0755
+    final mode = statMode & 0x1FF;
+    return mode == 0 ? 0x1A4 : mode;
+  }
+
+  static bool _isMachO(List<int> b) {
+    if (b.length < 4) return false;
+    final be = (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
+    return be == 0xFEEDFACE ||
+        be == 0xFEEDFACF ||
+        be == 0xCEFAEDFE ||
+        be == 0xCFFAEDFE ||
+        be == 0xCAFEBABE ||
+        be == 0xCAFEBABF;
   }
 }
