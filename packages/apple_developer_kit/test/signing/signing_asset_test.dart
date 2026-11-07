@@ -114,6 +114,123 @@ void main() {
     expect(asset.certificateCommonName, 'xcross Test Developer');
   });
 
+  test('App Store signing rejects development profiles', () async {
+    final paths = await _writeFixture(
+      temporaryDirectory,
+      'reject-development-for-app-store',
+      privateKeyPem: privateKeyPem,
+      certificatePem: certificatePem,
+      developerCertificates: [certificateDer],
+    );
+
+    await expectLater(
+      SigningAssetLoader(hostServices: testHostServices).load(
+        privateKeyPemPath: paths.key,
+        certificatePemPath: paths.certificate,
+        provisioningProfilePath: paths.profile,
+        requireAppStoreProfile: true,
+        now: now,
+        trustedRootCertificates: [certificateDer],
+      ),
+      throwsA(isA<AppleError>()),
+    );
+  });
+  group('App Store profile types', () {
+    test('accepts App Store-shaped distribution profile', () async {
+      final paths = await _writeFixture(
+        temporaryDirectory,
+        'app-store-profile',
+        privateKeyPem: privateKeyPem,
+        certificatePem: certificatePem,
+        developerCertificates: [certificateDer],
+        extraEntitlements: const {
+          'get-task-allow': false,
+          'beta-reports-active': true,
+        },
+      );
+
+      final asset = await SigningAssetLoader(hostServices: testHostServices)
+          .load(
+            privateKeyPemPath: paths.key,
+            certificatePemPath: paths.certificate,
+            provisioningProfilePath: paths.profile,
+            requireAppStoreProfile: true,
+            now: now,
+            trustedRootCertificates: [certificateDer],
+          );
+
+      expect(asset.entitlements['get-task-allow'], false);
+      expect(asset.entitlements['beta-reports-active'], true);
+    });
+
+    for (final scenario in [
+      (
+        'Ad Hoc',
+        <String, Object>{
+          'ProvisionedDevices': ['UDID'],
+        },
+      ),
+      ('Enterprise', <String, Object>{'ProvisionsAllDevices': true}),
+    ]) {
+      test('rejects ${scenario.$1} profile for App Store', () async {
+        final paths = await _writeFixture(
+          temporaryDirectory,
+          'reject-${scenario.$1}',
+          privateKeyPem: privateKeyPem,
+          certificatePem: certificatePem,
+          developerCertificates: [certificateDer],
+          extraEntitlements: const {
+            'get-task-allow': false,
+            'beta-reports-active': true,
+          },
+          extraProfileFields: scenario.$2,
+        );
+
+        await expectLater(
+          SigningAssetLoader(hostServices: testHostServices).load(
+            privateKeyPemPath: paths.key,
+            certificatePemPath: paths.certificate,
+            provisioningProfilePath: paths.profile,
+            requireAppStoreProfile: true,
+            now: now,
+            trustedRootCertificates: [certificateDer],
+          ),
+          throwsA(
+            isA<AppleError>().having(
+              (error) => error.message,
+              'message',
+              contains('not an App Store distribution profile'),
+            ),
+          ),
+        );
+      });
+    }
+  });
+  test('App Store signing rejects disabled beta reports', () async {
+    final paths = await _writeFixture(
+      temporaryDirectory,
+      'reject-disabled-beta-reports',
+      privateKeyPem: privateKeyPem,
+      certificatePem: certificatePem,
+      developerCertificates: [certificateDer],
+      extraEntitlements: const {
+        'get-task-allow': false,
+        'beta-reports-active': false,
+      },
+    );
+
+    await expectLater(
+      SigningAssetLoader(hostServices: testHostServices).load(
+        privateKeyPemPath: paths.key,
+        certificatePemPath: paths.certificate,
+        provisioningProfilePath: paths.profile,
+        requireAppStoreProfile: true,
+        now: now,
+        trustedRootCertificates: [certificateDer],
+      ),
+      throwsA(isA<AppleError>()),
+    );
+  });
   group('declaredEntitlements', () {
     // A development profile grants associated-domains as the wildcard "*",
     // meaning "whatever the app declares". Signing that verbatim leaves the app
@@ -822,6 +939,7 @@ Future<({String key, String certificate, String profile})> _writeFixture(
   Uint8List? profileCmsOverride,
   List<String>? appGroups,
   Map<String, Object>? extraEntitlements,
+  Map<String, Object>? extraProfileFields,
 }) async {
   final directory = Directory('${root.path}/$name')..createSync();
   final keyPath = '${directory.path}/key.pem';
@@ -846,6 +964,7 @@ Future<({String key, String certificate, String profile})> _writeFixture(
       for (final certificate in developerCertificates)
         ByteData.sublistView(certificate),
     ],
+    ...?extraProfileFields,
   };
   final Uint8List plist;
   if (binaryPlist) {
