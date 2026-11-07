@@ -230,15 +230,7 @@ final class AscProvisioning {
     final existing = await client.listProfilesForBundle(bundleIdResourceId);
     if (existing.length != 1) return;
     final only = existing.single;
-    if (only.name.startsWith(profileNamePrefix)) {
-      await client.deleteProfile(only.id);
-      return;
-    }
-    if (only.isDevelopment) {
-      onProgress?.call(
-        'Replacing the development profile "${only.name}" - it occupies the '
-        'only profile slot for this App ID.',
-      );
+    if (only.isDevelopment && only.name.startsWith(profileNamePrefix)) {
       await client.deleteProfile(only.id);
       return;
     }

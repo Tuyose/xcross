@@ -425,7 +425,11 @@ void main() {
     addTearDown(() => temp.deleteSync(recursive: true));
     final client = FakeProvisioningClient(
       existingProfiles: const [
-        AscProfileRef(id: 'old-profile', name: 'xcross Development 1'),
+        AscProfileRef(
+          id: 'old-profile',
+          name: 'xcross Development 1',
+          profileType: 'IOS_APP_DEVELOPMENT',
+        ),
       ],
     );
 
@@ -498,6 +502,52 @@ void main() {
     },
   );
 
+  test('never deletes App Store profile with xcross-like name', () async {
+    final temp = Directory.systemTemp.createTempSync('xcross_release_safety');
+    addTearDown(() => temp.deleteSync(recursive: true));
+
+    final client = FakeProvisioningClient(
+      existingProfiles: const [
+        AscProfileRef(
+          id: 'release-profile',
+          name: 'xcross Development 1',
+          profileType: 'IOS_APP_STORE',
+        ),
+      ],
+    );
+
+    await AscProvisioning(
+      hostServices: testHostServices,
+      client: client,
+    ).provisionDevelopmentIdentity(
+      bundleId: 'com.example.app',
+      deviceUdids: const ['UDID'],
+      outputDir: temp.path,
+    );
+
+    expect(client.deletedProfiles, isEmpty);
+  });
+  test('never deletes profile with unknown type', () async {
+    final temp = Directory.systemTemp.createTempSync('xcross_unknown_profile');
+    addTearDown(() => temp.deleteSync(recursive: true));
+
+    final client = FakeProvisioningClient(
+      existingProfiles: const [
+        AscProfileRef(id: 'unknown-profile', name: 'xcross Development 1'),
+      ],
+    );
+
+    await AscProvisioning(
+      hostServices: testHostServices,
+      client: client,
+    ).provisionDevelopmentIdentity(
+      bundleId: 'com.example.app',
+      deviceUdids: const ['UDID'],
+      outputDir: temp.path,
+    );
+
+    expect(client.deletedProfiles, isEmpty);
+  });
   test('keeps a profile xcross did not create', () async {
     final temp = Directory.systemTemp.createTempSync('xcross_profile_keep');
     addTearDown(() => temp.deleteSync(recursive: true));
@@ -525,7 +575,7 @@ void main() {
     expect(client.deletedProfiles, isEmpty);
   });
 
-  test('replaces a lone development profile another tool created', () async {
+  test('preserves a lone development profile another tool created', () async {
     final temp = Directory.systemTemp.createTempSync('xcross_profile_dev');
     addTearDown(() => temp.deleteSync(recursive: true));
     final client = FakeProvisioningClient(
@@ -547,7 +597,7 @@ void main() {
       outputDir: temp.path,
     );
 
-    expect(client.deletedProfiles, ['xcode-profile']);
+    expect(client.deletedProfiles, isEmpty);
   });
 
   // The profile xcross creates and the profile it is later willing to delete
