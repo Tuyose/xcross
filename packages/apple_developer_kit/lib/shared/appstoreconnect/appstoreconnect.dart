@@ -63,7 +63,7 @@ final class AscProvisioning {
   /// Mirrors xtool's `DeveloperServicesFetchCertificateOperation` +
   /// `DeveloperServicesFetchProfileOperation`:
   /// 1. Reuse a local identity whose serial is still on the team, otherwise
-  ///    revoke existing team certificates and issue a new `DEVELOPMENT` /
+  ///    issue a new `DEVELOPMENT` /
   ///    `IOS_DEVELOPMENT` cert.
   /// 2. Find-or-register [bundleId] and each of [deviceUdids].
   /// 3. Free a development-profile slot, but only of a profile xcross itself
@@ -312,7 +312,7 @@ final class AscProvisioning {
 
   /// xtool `DeveloperServicesFetchCertificateOperation.perform`: reuse the
   /// local identity when its serial is still on the team and unexpired;
-  /// otherwise revoke team certificates and create a new one. Returns the
+  /// otherwise issue a new certificate without revoking existing ones. Returns the
   /// certificate's serial number.
   Future<String> _loadOrIssueIdentity({
     required String certPath,
@@ -326,15 +326,14 @@ final class AscProvisioning {
       if (teamIds.isNotEmpty) return cached;
       onProgress?.call(
         'Cached Development certificate serial $cached is '
-        'gone from the team; revoking leftovers and re-issuing.',
+        'gone from the team; issuing a new identity without revoking '
+        'existing certificates.',
       );
-      await _revokeAllCertificates(onProgress: onProgress);
     }
     final serialNumber = await _issueAndPersistIdentity(
       certPath: certPath,
       keyPath: keyPath,
       statePath: statePath,
-      onProgress: onProgress,
     );
     return serialNumber;
   }
@@ -343,12 +342,10 @@ final class AscProvisioning {
     required String certPath,
     required String keyPath,
     required String statePath,
-    ProvisioningProgress? onProgress,
   }) async {
     final csr = AscCsr.generate();
-    final certificate = await _issueDevelopmentCertificate(
-      csr.csrPem,
-      onProgress: onProgress,
+    final certificate = await client.createDevelopmentCertificate(
+      csrPem: csr.csrPem,
     );
     await hostServices.host.fileSystem
         .file(certPath)
@@ -373,42 +370,6 @@ final class AscProvisioning {
           }),
         );
     return serialNumber;
-  }
-
-  /// Issues a Development certificate. On HTTP 409 (quota), revoke every
-  /// certificate on the team first — same as xtool's free-team
-  /// `replaceCertificates`.
-  Future<AscCertificate> _issueDevelopmentCertificate(
-    String csrPem, {
-    ProvisioningProgress? onProgress,
-  }) async {
-    try {
-      return await client.createDevelopmentCertificate(csrPem: csrPem);
-    } on AppleApiError catch (error) {
-      if (error.statusCode != 409) rethrow;
-      // A 409 with nothing to revoke means a *pending* request, which
-      // revoking cannot clear; surface it rather than retrying pointlessly.
-      final existing = await client.listCertificateIds();
-      if (existing.isEmpty) rethrow;
-      await _revokeAllCertificates(knownIds: existing, onProgress: onProgress);
-      final certificate = await client.createDevelopmentCertificate(
-        csrPem: csrPem,
-      );
-      return certificate;
-    }
-  }
-
-  Future<void> _revokeAllCertificates({
-    List<String>? knownIds,
-    ProvisioningProgress? onProgress,
-  }) async {
-    for (final id in knownIds ?? await client.listCertificateIds()) {
-      onProgress?.call(
-        'Revoking certificate $id: its private key is not on this machine. '
-        'Apps still signed with it must be re-signed.',
-      );
-      await client.revokeCertificate(id);
-    }
   }
 
   /// Serial of the cached identity when [certPath]/[keyPath] exist and the
