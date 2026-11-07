@@ -129,6 +129,21 @@ final class AscClient implements DevelopmentProvisioningClient {
     ),
   );
 
+  /// Creates an Apple Distribution certificate without modifying existing
+  /// certificates. Certificate quota errors are returned to the caller.
+  Future<AscCertificate> createDistributionCertificate({
+    required String csrPem,
+  }) async => AscCertificate.fromJson(
+    _data(
+      await _post(
+        '/certificates',
+        AscPayloads.certificate(
+          certificateType: 'DISTRIBUTION',
+          csrPem: csrPem,
+        ),
+      ),
+    ),
+  );
   @override
   Future<List<String>> listCertificateIds() async =>
       _ids(await _get('/certificates'));

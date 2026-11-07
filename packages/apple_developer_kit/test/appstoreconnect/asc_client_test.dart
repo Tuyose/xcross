@@ -77,6 +77,83 @@ void main() {
 
     expect(profile.id, 'profile-1');
   });
+  test(
+    'creates Apple Distribution certificate without revoking others',
+    () async {
+      var requests = 0;
+
+      final client = AscClient(
+        credentials,
+        httpClient: MockClient((request) async {
+          requests++;
+
+          expect(request.method, 'POST');
+          expect(request.url.path, '/v1/certificates');
+
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final data = body['data'] as Map<String, dynamic>;
+          final attributes = data['attributes'] as Map<String, dynamic>;
+
+          expect(attributes['certificateType'], 'DISTRIBUTION');
+          expect(attributes['csrContent'], 'TEST-CSR');
+
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'id': 'distribution-cert-1',
+                'attributes': {
+                  'certificateContent': 'AQID',
+                  'serialNumber': 'ABC123',
+                },
+              },
+            }),
+            201,
+          );
+        }),
+      );
+      addTearDown(client.close);
+
+      final certificate = await client.createDistributionCertificate(
+        csrPem: 'TEST-CSR',
+      );
+
+      expect(certificate.id, 'distribution-cert-1');
+      expect(requests, 1);
+    },
+  );
+  test(
+    'distribution certificate quota error never revokes certificates',
+    () async {
+      var requests = 0;
+
+      final client = AscClient(
+        credentials,
+        httpClient: MockClient((request) async {
+          requests++;
+
+          expect(request.method, 'POST');
+          expect(request.url.path, '/v1/certificates');
+
+          return http.Response(
+            jsonEncode({
+              'errors': [
+                {'detail': 'Certificate quota exceeded'},
+              ],
+            }),
+            409,
+          );
+        }),
+      );
+      addTearDown(client.close);
+
+      await expectLater(
+        client.createDistributionCertificate(csrPem: 'TEST-CSR'),
+        throwsA(isA<AppleApiError>()),
+      );
+
+      expect(requests, 1, reason: 'Must not retry or revoke certificates');
+    },
+  );
   group('findBundleId', () {
     test('picks the exact match out of a prefix-matched page', () async {
       // Apple treats filter[identifier] as a prefix match, so an app's query
