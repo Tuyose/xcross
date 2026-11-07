@@ -22,7 +22,8 @@ FlutterBuildArgs _$parseFlutterBuildArgsResult(ArgResults result) =>
       ..treeShakeIcons = result['tree-shake-icons'] as bool
       ..splitDebugInfo = result['split-debug-info'] as String?
       ..obfuscate = result['obfuscate'] as bool
-      ..ipa = result['ipa'] as bool;
+      ..ipa = result['ipa'] as bool
+      ..appStore = result['app-store'] as bool;
 
 ArgParser _$populateFlutterBuildArgsParser(ArgParser parser) => parser
   ..addOption(
@@ -92,6 +93,11 @@ ArgParser _$populateFlutterBuildArgsParser(ArgParser parser) => parser
     'ipa',
     abbr: 'i',
     help: 'Output a .ipa file instead of a .app.',
+    negatable: false,
+  )
+  ..addFlag(
+    'app-store',
+    help: 'Sign a release IPA for App Store distribution.',
     negatable: false,
   );
 
