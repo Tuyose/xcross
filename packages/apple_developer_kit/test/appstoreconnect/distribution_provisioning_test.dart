@@ -27,6 +27,7 @@ String _matchingTestCertificate(http.Request request, String identityDir) {
     privateKey,
     csrPem,
     365,
+    serialNumber: '11256099',
   );
 
   return base64Encode(CryptoUtils.getBytesFromPEMString(certificatePem));
@@ -529,12 +530,14 @@ void main() {
       privateKeyPath: authKey.path,
     );
 
+    var apiRequests = 0;
     var certificateCreations = 0;
     var profileCreations = 0;
 
     final client = AscClient(
       credentials,
       httpClient: MockClient((request) async {
+        apiRequests++;
         final path = request.url.path;
 
         if (request.method == 'POST' && path == '/v1/certificates') {
@@ -561,6 +564,26 @@ void main() {
               },
             }),
             201,
+          );
+        }
+
+        if (request.method == 'GET' &&
+            path == '/v1/bundleIds' &&
+            request.url.queryParameters['filter[identifier]'] ==
+                'com.example.second') {
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {
+                  'id': 'bundle-2',
+                  'attributes': {
+                    'identifier': 'com.example.second',
+                    'name': 'Second',
+                  },
+                },
+              ],
+            }),
+            200,
           );
         }
 
@@ -599,6 +622,14 @@ void main() {
           final data = body['data'] as Map;
           final attributes = data['attributes'] as Map;
           final relationships = data['relationships'] as Map;
+
+          final bundleRelationship = relationships['bundleId'] as Map;
+          final bundleData = bundleRelationship['data'] as Map;
+
+          expect(
+            bundleData['id'],
+            profileCreations == 1 ? 'bundle-1' : 'bundle-2',
+          );
 
           expect(attributes['profileType'], 'IOS_APP_STORE');
           expect(relationships.containsKey('devices'), isFalse);
@@ -647,5 +678,155 @@ void main() {
 
     expect(devCert.readAsStringSync(), 'EXISTING DEVELOPMENT CERTIFICATE');
     expect(devKey.readAsStringSync(), 'EXISTING DEVELOPMENT KEY');
+
+    final originalCertificate = File(
+      result.certificatePemPath,
+    ).readAsBytesSync();
+
+    final originalPrivateKey = File(result.privateKeyPemPath).readAsBytesSync();
+
+    final originalState = File(
+      p.join(identityDir.path, 'distribution-state.json'),
+    ).readAsBytesSync();
+
+    final secondOutputDir = Directory(p.join(temp.path, 'second-profile'))
+      ..createSync();
+
+    final provisioning = AscDistributionProvisioning(
+      hostServices: testHostServices,
+      client: client,
+    );
+
+    final second = await provisioning.provisionProfileForExistingIdentity(
+      bundleId: 'com.example.second',
+      identityDir: identityDir.path,
+      outputDir: secondOutputDir.path,
+    );
+
+    // Only the profile is new. The certificate and key are reused.
+    expect(certificateCreations, 1);
+    expect(profileCreations, 2);
+    expect(File(second.profilePath).readAsBytesSync(), [4, 5, 6]);
+
+    expect(
+      File(second.certificatePemPath).readAsBytesSync(),
+      originalCertificate,
+    );
+    expect(
+      File(second.privateKeyPemPath).readAsBytesSync(),
+      originalPrivateKey,
+    );
+    expect(
+      File(
+        p.join(identityDir.path, 'distribution-state.json'),
+      ).readAsBytesSync(),
+      originalState,
+    );
+
+    // Repeating profile creation must not overwrite existing files.
+    await expectLater(
+      provisioning.provisionProfileForExistingIdentity(
+        bundleId: 'com.example.second',
+        identityDir: identityDir.path,
+        outputDir: secondOutputDir.path,
+      ),
+      throwsA(isA<AppleError>()),
+    );
+
+    expect(certificateCreations, 1);
+    expect(profileCreations, 2);
+    // An unregistered Bundle ID must not create a profile.
+    final rejectedDir = p.join(temp.path, 'unregistered-profile');
+
+    await expectLater(
+      provisioning.provisionProfileForExistingIdentity(
+        bundleId: 'com.example.unregistered',
+        identityDir: identityDir.path,
+        outputDir: rejectedDir,
+      ),
+      throwsA(
+        isA<AppleError>().having(
+          (error) => error.message,
+          'message',
+          contains('not registered'),
+        ),
+      ),
+    );
+
+    expect(
+      File(
+        p.join(rejectedDir, 'distribution-profile.mobileprovision'),
+      ).existsSync(),
+      isFalse,
+    );
+
+    // Invalid identity state must be rejected without replacing files.
+    final stateFile = File(p.join(identityDir.path, 'distribution-state.json'));
+
+    stateFile.writeAsStringSync('{"certificateSerialNumber":""}');
+
+    try {
+      await expectLater(
+        provisioning.provisionProfileForExistingIdentity(
+          bundleId: 'com.example.second',
+          identityDir: identityDir.path,
+          outputDir: p.join(temp.path, 'invalid-state-profile'),
+        ),
+        throwsA(
+          isA<AppleError>().having(
+            (error) => error.message,
+            'message',
+            contains('no valid certificate serial number'),
+          ),
+        ),
+      );
+    } finally {
+      stateFile.writeAsBytesSync(originalState);
+    }
+
+    expect(stateFile.readAsBytesSync(), originalState);
+
+    // A well-formed but incorrect serial must fail without Apple API calls.
+    final requestsBeforeMismatch = apiRequests;
+    final tamperedState =
+        jsonDecode(stateFile.readAsStringSync()) as Map<String, dynamic>;
+
+    tamperedState['certificateSerialNumber'] = 'DEADBEEF';
+
+    final mismatchDir = p.join(temp.path, 'mismatch-state-profile');
+
+    try {
+      stateFile.writeAsStringSync(jsonEncode(tamperedState));
+
+      await expectLater(
+        provisioning.provisionProfileForExistingIdentity(
+          bundleId: 'com.example.second',
+          identityDir: identityDir.path,
+          outputDir: mismatchDir,
+        ),
+        throwsA(
+          isA<AppleError>().having(
+            (error) => error.message,
+            'message',
+            contains('serial number does not match'),
+          ),
+        ),
+      );
+
+      expect(apiRequests, requestsBeforeMismatch);
+
+      expect(
+        File(
+          p.join(mismatchDir, 'distribution-profile.mobileprovision'),
+        ).existsSync(),
+        isFalse,
+      );
+    } finally {
+      stateFile.writeAsBytesSync(originalState);
+    }
+
+    expect(stateFile.readAsBytesSync(), originalState);
+    expect(certificateCreations, 1);
+    expect(profileCreations, 2);
   });
 }

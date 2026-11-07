@@ -93,6 +93,11 @@ final class AscDistributionProvisioning {
       privateKeyPem: await fs.file(keyPath).readAsString(),
     );
 
+    DistributionCertificateValidator.validateSerialNumber(
+      certificatePem: certificatePem,
+      expectedSerialNumber: certificate.serialNumber ?? '',
+    );
+
     await fs.file(certPath).writeAsString(certificatePem);
 
     await SecureFile(hostServices: hostServices).writeString(
@@ -133,6 +138,90 @@ final class AscDistributionProvisioning {
       profileType: 'IOS_APP_STORE',
     );
 
+    await fs
+        .file(profilePath)
+        .writeAsBytes(base64.decode(profile.profileContentBase64));
+
+    return DistributionIdentityPaths(
+      certificatePemPath: certPath,
+      privateKeyPemPath: keyPath,
+      profilePath: profilePath,
+    );
+  }
+
+  /// Creates another App Store profile using an existing Distribution
+  /// certificate. Never issues or revokes a certificate.
+  Future<DistributionIdentityPaths> provisionProfileForExistingIdentity({
+    required String bundleId,
+    required String identityDir,
+    required String outputDir,
+  }) async {
+    final fs = hostServices.host.fileSystem;
+    final paths = hostServices.host.paths.context;
+
+    final certPath = paths.join(identityDir, 'distribution-cert.pem');
+    final keyPath = paths.join(identityDir, 'distribution-key.pem');
+    final statePath = paths.join(identityDir, 'distribution-state.json');
+    final profilePath = paths.join(
+      outputDir,
+      'distribution-profile.mobileprovision',
+    );
+
+    if (fs.file(profilePath).existsSync()) {
+      throw AppleError('Distribution profile already exists: $profilePath');
+    }
+
+    for (final path in [certPath, keyPath, statePath]) {
+      if (!fs.file(path).existsSync()) {
+        throw AppleError('Incomplete Distribution identity; missing $path');
+      }
+    }
+
+    DistributionCertificateValidator.validate(
+      certificatePem: await fs.file(certPath).readAsString(),
+      privateKeyPem: await fs.file(keyPath).readAsString(),
+    );
+
+    final state = jsonDecode(await fs.file(statePath).readAsString());
+
+    if (state is! Map ||
+        state['certificateSerialNumber'] is! String ||
+        (state['certificateSerialNumber'] as String).isEmpty) {
+      throw const AppleError(
+        'Distribution identity has no valid certificate serial number.',
+      );
+    }
+
+    final serial = state['certificateSerialNumber'] as String;
+
+    DistributionCertificateValidator.validateSerialNumber(
+      certificatePem: await fs.file(certPath).readAsString(),
+      expectedSerialNumber: serial,
+    );
+
+    final bundle = await client.findBundleId(bundleId);
+    if (bundle == null) {
+      throw AppleError('Bundle ID "$bundleId" is not registered with Apple.');
+    }
+
+    final certificateIds = await client.findCertificateIdsBySerial(serial);
+
+    if (certificateIds.length != 1) {
+      throw AppleError(
+        'Expected exactly one Distribution certificate for serial '
+        '$serial, found ${certificateIds.length}.',
+      );
+    }
+
+    final profile = await client.createProfile(
+      name: 'xcross Distribution ${DateTime.now().microsecondsSinceEpoch}',
+      bundleIdResourceId: bundle.id,
+      certificateResourceIds: certificateIds,
+      deviceResourceIds: const [],
+      profileType: 'IOS_APP_STORE',
+    );
+
+    await fs.directory(outputDir).create(recursive: true);
     await fs
         .file(profilePath)
         .writeAsBytes(base64.decode(profile.profileContentBase64));
