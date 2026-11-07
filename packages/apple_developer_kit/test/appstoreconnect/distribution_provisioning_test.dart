@@ -5,6 +5,7 @@ import 'package:apple_developer_kit/shared/appstoreconnect/asc_client.dart';
 import 'package:apple_developer_kit/shared/appstoreconnect/asc_config.dart';
 import 'package:apple_developer_kit/shared/appstoreconnect/distribution_provisioning.dart';
 import 'package:apple_developer_kit/shared/errors/errors.dart';
+import 'package:apple_developer_kit/src/shared/signing/x509.dart';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -12,6 +13,24 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/host_services.dart';
+
+String _matchingTestCertificate(http.Request request, String identityDir) {
+  final keyPath = p.join(identityDir, 'distribution-key.pem');
+  final privateKey = parsePrivateKey(File(keyPath).readAsStringSync(), keyPath);
+
+  final payload = jsonDecode(request.body) as Map<String, dynamic>;
+  final data = payload['data'] as Map<String, dynamic>;
+  final attributes = data['attributes'] as Map<String, dynamic>;
+  final csrPem = attributes['csrContent'] as String;
+
+  final certificatePem = X509Utils.generateSelfSignedCertificate(
+    privateKey,
+    csrPem,
+    365,
+  );
+
+  return base64Encode(CryptoUtils.getBytesFromPEMString(certificatePem));
+}
 
 void main() {
   for (final filename in [
@@ -248,7 +267,10 @@ void main() {
               'data': {
                 'id': 'created-cert',
                 'attributes': {
-                  'certificateContent': base64Encode([1, 2, 3]),
+                  'certificateContent': _matchingTestCertificate(
+                    request,
+                    identityDir.path,
+                  ),
                   'serialNumber': 'ABC123',
                   'expirationDate': '2040-01-01T00:00:00Z',
                 },
@@ -331,6 +353,157 @@ void main() {
     expect(profileCreations, 1);
     expect(deletionRequests, 0);
   });
+  test(
+    'rejects mismatched Apple certificate before profile creation',
+    () async {
+      final temp = Directory.systemTemp.createTempSync(
+        'xcross_distribution_mismatch_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+
+      final identityDir = Directory(p.join(temp.path, 'identity'))
+        ..createSync();
+      final outputDir = Directory(p.join(temp.path, 'profiles'))..createSync();
+
+      final authPair = CryptoUtils.generateEcKeyPair();
+      final authKey = File(p.join(temp.path, 'AuthKey_TEST.p8'))
+        ..writeAsStringSync(
+          CryptoUtils.encodeEcPrivateKeyToPem(
+            authPair.privateKey as ECPrivateKey,
+          ),
+        );
+
+      // Simulate Apple returning a valid certificate for the WRONG key.
+      final wrongPair = CryptoUtils.generateRSAKeyPair(keySize: 1024);
+      final wrongPrivate = wrongPair.privateKey as RSAPrivateKey;
+      final wrongCsr = X509Utils.generateRsaCsrPem(
+        {'CN': 'Wrong Distribution Certificate'},
+        wrongPrivate,
+        wrongPair.publicKey as RSAPublicKey,
+      );
+
+      final wrongCertificate = X509Utils.generateSelfSignedCertificate(
+        wrongPrivate,
+        wrongCsr,
+        365,
+      );
+
+      final wrongCertificateBase64 = base64Encode(
+        CryptoUtils.getBytesFromPEMString(wrongCertificate),
+      );
+
+      var certificateCreations = 0;
+      var profileCreations = 0;
+      var deletions = 0;
+
+      final client = AscClient(
+        AscCredentials(
+          hostServices: testHostServices,
+          issuerId: 'issuer-test',
+          keyId: 'TESTKEY123',
+          privateKeyPath: authKey.path,
+        ),
+        httpClient: MockClient((request) async {
+          final path = request.url.path;
+
+          if (request.method == 'DELETE') {
+            deletions++;
+            return http.Response('', 204);
+          }
+
+          if (request.method == 'GET' && path == '/v1/bundleIds') {
+            return http.Response(
+              jsonEncode({
+                'data': [
+                  {
+                    'id': 'bundle-1',
+                    'attributes': {
+                      'identifier': 'com.example.app',
+                      'name': 'Example',
+                    },
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.method == 'POST' && path == '/v1/certificates') {
+            certificateCreations++;
+            return http.Response(
+              jsonEncode({
+                'data': {
+                  'id': 'wrong-cert',
+                  'attributes': {
+                    'certificateContent': wrongCertificateBase64,
+                    'serialNumber': 'ABC123',
+                    'expirationDate': '2040-01-01T00:00:00Z',
+                  },
+                },
+              }),
+              201,
+            );
+          }
+
+          if (request.method == 'GET' && path == '/v1/certificates') {
+            return http.Response(
+              jsonEncode({
+                'data': [
+                  {'id': 'wrong-cert'},
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.method == 'POST' && path == '/v1/profiles') {
+            profileCreations++;
+            return http.Response(
+              jsonEncode({
+                'data': {
+                  'id': 'profile-1',
+                  'attributes': {
+                    'profileContent': base64Encode([4, 5, 6]),
+                  },
+                },
+              }),
+              201,
+            );
+          }
+
+          fail('Unexpected request: ${request.method} ${request.url}');
+        }),
+      );
+      addTearDown(client.close);
+
+      await expectLater(
+        AscDistributionProvisioning(
+          hostServices: testHostServices,
+          client: client,
+        ).provisionIdentity(
+          bundleId: 'com.example.app',
+          identityDir: identityDir.path,
+          outputDir: outputDir.path,
+        ),
+        throwsA(
+          isA<AppleError>().having(
+            (AppleError error) => error.message,
+            'message',
+            contains('does not match'),
+          ),
+        ),
+      );
+
+      expect(certificateCreations, 1);
+      expect(profileCreations, 0);
+      expect(deletions, 0);
+
+      expect(
+        File(p.join(identityDir.path, 'distribution-key.pem')).existsSync(),
+        isTrue,
+      );
+    },
+  );
   test('creates isolated distribution identity without revocation', () async {
     final temp = Directory.systemTemp.createTempSync('xcross_distribution');
     addTearDown(() => temp.deleteSync(recursive: true));
@@ -378,7 +551,10 @@ void main() {
               'data': {
                 'id': 'created-cert',
                 'attributes': {
-                  'certificateContent': base64Encode([1, 2, 3]),
+                  'certificateContent': _matchingTestCertificate(
+                    request,
+                    identityDir.path,
+                  ),
                   'serialNumber': 'ABC123',
                   'expirationDate': '2040-01-01T00:00:00Z',
                 },

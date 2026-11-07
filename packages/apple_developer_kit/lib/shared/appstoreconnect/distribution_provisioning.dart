@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:apple_developer_kit/host/shared/apple_host_services.dart';
 import 'package:apple_developer_kit/shared/appstoreconnect/appstoreconnect.dart';
 import 'package:apple_developer_kit/shared/appstoreconnect/asc_client.dart';
+import 'package:apple_developer_kit/shared/appstoreconnect/distribution_certificate_validator.dart';
 import 'package:apple_developer_kit/shared/errors/errors.dart';
 import 'package:apple_developer_kit/src/shared/appstoreconnect/asc_csr.dart';
 import 'package:apple_developer_kit/src/shared/secure/secure_file.dart';
@@ -82,11 +83,17 @@ final class AscDistributionProvisioning {
       csrPem: csr.csrPem,
     );
 
-    await fs
-        .file(certPath)
-        .writeAsString(
-          AscProvisioning.wrapDerAsPem(certificate.certificateContentBase64),
-        );
+    final certificatePem = AscProvisioning.wrapDerAsPem(
+      certificate.certificateContentBase64,
+    );
+
+    // Reject mismatched certificates before creating a profile.
+    DistributionCertificateValidator.validate(
+      certificatePem: certificatePem,
+      privateKeyPem: await fs.file(keyPath).readAsString(),
+    );
+
+    await fs.file(certPath).writeAsString(certificatePem);
 
     await SecureFile(hostServices: hostServices).writeString(
       statePath,
