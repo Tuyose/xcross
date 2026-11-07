@@ -1,0 +1,475 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:apple_developer_kit/shared/appstoreconnect/asc_client.dart';
+import 'package:apple_developer_kit/shared/appstoreconnect/asc_config.dart';
+import 'package:apple_developer_kit/shared/appstoreconnect/distribution_provisioning.dart';
+import 'package:apple_developer_kit/shared/errors/errors.dart';
+import 'package:basic_utils/basic_utils.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:path/path.dart' as p;
+import 'package:test/test.dart';
+
+import '../support/host_services.dart';
+
+void main() {
+  for (final filename in [
+    'distribution-cert.pem',
+    'distribution-key.pem',
+    'distribution-state.json',
+    'distribution-profile.mobileprovision',
+  ]) {
+    test('refuses to overwrite existing $filename', () async {
+      final temp = Directory.systemTemp.createTempSync(
+        'xcross_distribution_existing_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+
+      final identityDir = Directory(p.join(temp.path, 'identity'))
+        ..createSync();
+      final outputDir = Directory(p.join(temp.path, 'profiles'))..createSync();
+
+      final protectedPath = filename.endsWith('.mobileprovision')
+          ? p.join(outputDir.path, filename)
+          : p.join(identityDir.path, filename);
+
+      File(protectedPath).writeAsStringSync('DO NOT OVERWRITE');
+
+      var requests = 0;
+
+      final client = AscClient(
+        AscCredentials(
+          hostServices: testHostServices,
+          issuerId: 'test',
+          keyId: 'test',
+          privateKeyPath: p.join(temp.path, 'unused.p8'),
+        ),
+        httpClient: MockClient((request) async {
+          requests++;
+          return http.Response('{}', 500);
+        }),
+      );
+      addTearDown(client.close);
+
+      await expectLater(
+        AscDistributionProvisioning(
+          hostServices: testHostServices,
+          client: client,
+        ).provisionIdentity(
+          bundleId: 'com.example.app',
+          identityDir: identityDir.path,
+          outputDir: outputDir.path,
+        ),
+        throwsA(
+          isA<AppleError>().having(
+            (AppleError error) => error.message,
+            'message',
+            contains('already exists'),
+          ),
+        ),
+      );
+
+      expect(requests, 0);
+      expect(File(protectedPath).readAsStringSync(), 'DO NOT OVERWRITE');
+    });
+  }
+
+  test(
+    'preserves private key and does not retry certificate conflict',
+    () async {
+      final temp = Directory.systemTemp.createTempSync(
+        'xcross_distribution_conflict_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+
+      final identityDir = Directory(p.join(temp.path, 'identity'))
+        ..createSync();
+      final outputDir = Directory(p.join(temp.path, 'profiles'))..createSync();
+
+      final keyPair = CryptoUtils.generateEcKeyPair();
+      final authKey = File(p.join(temp.path, 'AuthKey_TEST.p8'));
+      authKey.writeAsStringSync(
+        CryptoUtils.encodeEcPrivateKeyToPem(keyPair.privateKey as ECPrivateKey),
+      );
+
+      var certificateCreations = 0;
+      var deletionRequests = 0;
+
+      final client = AscClient(
+        AscCredentials(
+          hostServices: testHostServices,
+          issuerId: 'issuer-test',
+          keyId: 'TESTKEY123',
+          privateKeyPath: authKey.path,
+        ),
+        httpClient: MockClient((request) async {
+          if (request.method == 'DELETE') {
+            deletionRequests++;
+            return http.Response('{}', 204);
+          }
+
+          if (request.method == 'GET' && request.url.path == '/v1/bundleIds') {
+            return http.Response(
+              jsonEncode({
+                'data': [
+                  {
+                    'id': 'bundle-1',
+                    'attributes': {
+                      'identifier': 'com.example.app',
+                      'name': 'Example',
+                    },
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.method == 'POST' &&
+              request.url.path == '/v1/certificates') {
+            certificateCreations++;
+            return http.Response(
+              jsonEncode({
+                'errors': [
+                  {'status': '409', 'detail': 'Certificate limit reached'},
+                ],
+              }),
+              409,
+            );
+          }
+
+          fail('Unexpected request: ${request.method} ${request.url}');
+        }),
+      );
+      addTearDown(client.close);
+
+      final provisioning = AscDistributionProvisioning(
+        hostServices: testHostServices,
+        client: client,
+      );
+
+      Future<void> attempt() async {
+        await provisioning.provisionIdentity(
+          bundleId: 'com.example.app',
+          identityDir: identityDir.path,
+          outputDir: outputDir.path,
+        );
+      }
+
+      await expectLater(attempt(), throwsA(isA<AppleError>()));
+
+      final privateKey = File(p.join(identityDir.path, 'distribution-key.pem'));
+
+      expect(privateKey.existsSync(), isTrue);
+      final originalKey = privateKey.readAsStringSync();
+      expect(originalKey, contains('PRIVATE KEY'));
+
+      expect(certificateCreations, 1);
+      expect(deletionRequests, 0);
+
+      // A second attempt must stop locally before contacting Apple.
+      await expectLater(
+        attempt(),
+        throwsA(
+          isA<AppleError>().having(
+            (AppleError error) => error.message,
+            'message',
+            contains('already exists'),
+          ),
+        ),
+      );
+
+      expect(privateKey.readAsStringSync(), originalKey);
+      expect(certificateCreations, 1);
+      expect(deletionRequests, 0);
+
+      expect(
+        File(p.join(identityDir.path, 'distribution-cert.pem')).existsSync(),
+        isFalse,
+      );
+    },
+  );
+  test('preserves identity when App Store profile creation fails', () async {
+    final temp = Directory.systemTemp.createTempSync(
+      'xcross_distribution_profile_failure_',
+    );
+    addTearDown(() => temp.deleteSync(recursive: true));
+
+    final identityDir = Directory(p.join(temp.path, 'identity'))..createSync();
+    final outputDir = Directory(p.join(temp.path, 'profiles'))..createSync();
+
+    final keyPair = CryptoUtils.generateEcKeyPair();
+    final authKey = File(p.join(temp.path, 'AuthKey_TEST.p8'));
+    authKey.writeAsStringSync(
+      CryptoUtils.encodeEcPrivateKeyToPem(keyPair.privateKey as ECPrivateKey),
+    );
+
+    var certificateCreations = 0;
+    var profileCreations = 0;
+    var deletionRequests = 0;
+
+    final client = AscClient(
+      AscCredentials(
+        hostServices: testHostServices,
+        issuerId: 'issuer-test',
+        keyId: 'TESTKEY123',
+        privateKeyPath: authKey.path,
+      ),
+      httpClient: MockClient((request) async {
+        final path = request.url.path;
+
+        if (request.method == 'DELETE') {
+          deletionRequests++;
+          return http.Response('', 204);
+        }
+
+        if (request.method == 'GET' && path == '/v1/bundleIds') {
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {
+                  'id': 'bundle-1',
+                  'attributes': {
+                    'identifier': 'com.example.app',
+                    'name': 'Example',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }
+
+        if (request.method == 'POST' && path == '/v1/certificates') {
+          certificateCreations++;
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'id': 'created-cert',
+                'attributes': {
+                  'certificateContent': base64Encode([1, 2, 3]),
+                  'serialNumber': 'ABC123',
+                  'expirationDate': '2040-01-01T00:00:00Z',
+                },
+              },
+            }),
+            201,
+          );
+        }
+
+        if (request.method == 'GET' && path == '/v1/certificates') {
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {'id': 'created-cert'},
+              ],
+            }),
+            200,
+          );
+        }
+
+        if (request.method == 'POST' && path == '/v1/profiles') {
+          profileCreations++;
+          return http.Response(
+            jsonEncode({
+              'errors': [
+                {'status': '409', 'detail': 'Profile creation rejected'},
+              ],
+            }),
+            409,
+          );
+        }
+
+        fail('Unexpected request: ${request.method} ${request.url}');
+      }),
+    );
+    addTearDown(client.close);
+
+    final provisioning = AscDistributionProvisioning(
+      hostServices: testHostServices,
+      client: client,
+    );
+
+    Future<void> attempt() => provisioning
+        .provisionIdentity(
+          bundleId: 'com.example.app',
+          identityDir: identityDir.path,
+          outputDir: outputDir.path,
+        )
+        .then((_) {});
+
+    await expectLater(attempt(), throwsA(isA<AppleError>()));
+
+    final key = File(p.join(identityDir.path, 'distribution-key.pem'));
+    final cert = File(p.join(identityDir.path, 'distribution-cert.pem'));
+    final state = File(p.join(identityDir.path, 'distribution-state.json'));
+    final profile = File(
+      p.join(outputDir.path, 'distribution-profile.mobileprovision'),
+    );
+
+    expect(key.existsSync(), isTrue);
+    expect(cert.existsSync(), isTrue);
+    expect(state.existsSync(), isTrue);
+    expect(profile.existsSync(), isFalse);
+
+    final originalKey = key.readAsStringSync();
+    expect(originalKey, contains('PRIVATE KEY'));
+
+    final savedState = jsonDecode(state.readAsStringSync()) as Map;
+    expect(savedState['certificateSerialNumber'], 'ABC123');
+
+    expect(certificateCreations, 1);
+    expect(profileCreations, 1);
+    expect(deletionRequests, 0);
+
+    // A retry must not create a second Apple Distribution certificate.
+    await expectLater(attempt(), throwsA(isA<AppleError>()));
+
+    expect(key.readAsStringSync(), originalKey);
+    expect(certificateCreations, 1);
+    expect(profileCreations, 1);
+    expect(deletionRequests, 0);
+  });
+  test('creates isolated distribution identity without revocation', () async {
+    final temp = Directory.systemTemp.createTempSync('xcross_distribution');
+    addTearDown(() => temp.deleteSync(recursive: true));
+
+    final identityDir = Directory(p.join(temp.path, 'identity'))..createSync();
+    final outputDir = Directory(p.join(temp.path, 'profiles'))..createSync();
+
+    final devCert = File(p.join(identityDir.path, 'cert.pem'))
+      ..writeAsStringSync('EXISTING DEVELOPMENT CERTIFICATE');
+    final devKey = File(p.join(identityDir.path, 'key.pem'))
+      ..writeAsStringSync('EXISTING DEVELOPMENT KEY');
+
+    final keyPair = CryptoUtils.generateEcKeyPair();
+    final authKey = File(p.join(temp.path, 'AuthKey_TEST.p8'));
+    authKey.writeAsStringSync(
+      CryptoUtils.encodeEcPrivateKeyToPem(keyPair.privateKey as ECPrivateKey),
+    );
+
+    final credentials = AscCredentials(
+      hostServices: testHostServices,
+      issuerId: 'issuer-test',
+      keyId: 'TESTKEY123',
+      privateKeyPath: authKey.path,
+    );
+
+    var certificateCreations = 0;
+    var profileCreations = 0;
+
+    final client = AscClient(
+      credentials,
+      httpClient: MockClient((request) async {
+        final path = request.url.path;
+
+        if (request.method == 'POST' && path == '/v1/certificates') {
+          certificateCreations++;
+          final body = jsonDecode(request.body) as Map;
+          final data = body['data'] as Map;
+          final attributes = data['attributes'] as Map;
+
+          expect(attributes['certificateType'], 'DISTRIBUTION');
+          expect(attributes['csrContent'], isNotEmpty);
+
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'id': 'created-cert',
+                'attributes': {
+                  'certificateContent': base64Encode([1, 2, 3]),
+                  'serialNumber': 'ABC123',
+                  'expirationDate': '2040-01-01T00:00:00Z',
+                },
+              },
+            }),
+            201,
+          );
+        }
+
+        if (request.method == 'GET' && path == '/v1/bundleIds') {
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {
+                  'id': 'bundle-1',
+                  'attributes': {
+                    'identifier': 'com.example.app',
+                    'name': 'Example',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }
+
+        if (request.method == 'GET' && path == '/v1/certificates') {
+          expect(request.url.queryParameters['filter[serialNumber]'], 'ABC123');
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {'id': 'team-cert-1'},
+              ],
+            }),
+            200,
+          );
+        }
+
+        if (request.method == 'POST' && path == '/v1/profiles') {
+          profileCreations++;
+          final body = jsonDecode(request.body) as Map;
+          final data = body['data'] as Map;
+          final attributes = data['attributes'] as Map;
+          final relationships = data['relationships'] as Map;
+
+          expect(attributes['profileType'], 'IOS_APP_STORE');
+          expect(relationships.containsKey('devices'), isFalse);
+
+          final certificates =
+              (relationships['certificates'] as Map)['data'] as List;
+          expect(
+            (certificates.single as Map<String, dynamic>)['id'],
+            'team-cert-1',
+          );
+
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'id': 'profile-1',
+                'attributes': {
+                  'profileContent': base64Encode([4, 5, 6]),
+                },
+              },
+            }),
+            201,
+          );
+        }
+
+        fail('Unexpected request: ${request.method} ${request.url}');
+      }),
+    );
+    addTearDown(client.close);
+
+    final result =
+        await AscDistributionProvisioning(
+          hostServices: testHostServices,
+          client: client,
+        ).provisionIdentity(
+          bundleId: 'com.example.app',
+          identityDir: identityDir.path,
+          outputDir: outputDir.path,
+        );
+
+    expect(certificateCreations, 1);
+    expect(profileCreations, 1);
+
+    expect(File(result.certificatePemPath).existsSync(), isTrue);
+    expect(File(result.privateKeyPemPath).existsSync(), isTrue);
+    expect(File(result.profilePath).readAsBytesSync(), [4, 5, 6]);
+
+    expect(devCert.readAsStringSync(), 'EXISTING DEVELOPMENT CERTIFICATE');
+    expect(devKey.readAsStringSync(), 'EXISTING DEVELOPMENT KEY');
+  });
+}
