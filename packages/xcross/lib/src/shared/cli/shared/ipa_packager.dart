@@ -80,11 +80,11 @@ final class IpaPackager {
       }
 
       try {
-        await _renameFile(staged, host.paths.ioPath(ipaPath));
+        await _renameFile(staged, host.paths.ioPath(ipaFile.path));
       } catch (publishError, publishTrace) {
         if (backup.existsSync()) {
           try {
-            await _renameFile(backup, host.paths.ioPath(ipaPath));
+            await _renameFile(backup, host.paths.ioPath(ipaFile.path));
           } catch (restoreError) {
             // Never delete the only surviving copy of the previous IPA.
             preserveRecoveryFiles = true;
