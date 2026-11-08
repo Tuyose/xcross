@@ -30,6 +30,23 @@ final class XcconfigResolver {
     overrides: overrides,
   );
 
+  Map<String, String> readDebugConfigurationSync({
+    required String debugPath,
+    required String generatedPath,
+    String configuration = 'Debug',
+    String sdk = 'iphoneos',
+    String arch = 'arm64',
+    Map<String, String> defaults = const {},
+    Map<String, String> overrides = const {},
+  }) => readFilesSync(
+    [if (fileSystem.file(debugPath).existsSync()) debugPath else generatedPath],
+    configuration: configuration,
+    sdk: sdk,
+    arch: arch,
+    defaults: defaults,
+    overrides: overrides,
+  );
+
   static Map<String, String> parseText(
     String text, {
     String configuration = 'Debug',
@@ -75,6 +92,31 @@ final class XcconfigResolver {
   }
 
   /// Join Xcode's backslash-continued physical lines before parsing settings.
+  Map<String, String> readFilesSync(
+    Iterable<String> paths, {
+    String configuration = 'Debug',
+    String sdk = 'iphoneos',
+    String arch = 'arm64',
+    Map<String, String> defaults = const {},
+    Map<String, String> overrides = const {},
+  }) {
+    final evaluation = XcconfigEvaluation(
+      configuration: configuration,
+      sdk: sdk,
+      arch: arch,
+      defaults: defaults,
+      overrides: overrides,
+    );
+
+    final reader = XcconfigFileReader(evaluation, fileSystem, this.paths);
+
+    for (final path in paths) {
+      reader.readSync(path, optional: true);
+    }
+
+    return evaluation.resolved();
+  }
+
   static Iterable<String> _logicalLines(Iterable<String> lines) sync* {
     final comments = XcconfigComments();
     var pending = '';
@@ -122,6 +164,43 @@ final class XcconfigFileReader {
 
   final XcconfigEvaluation _evaluation;
   final _activeFiles = <String>{};
+
+  void readSync(String path, {required bool optional}) {
+    final file = fileSystem.file(path);
+
+    if (!file.existsSync()) {
+      if (optional) return;
+      throw FormatException('Required xcconfig include not found: $path');
+    }
+
+    final resolved = paths.normalize(file.absolute.path);
+
+    if (!_activeFiles.add(resolved)) {
+      throw FormatException('xcconfig include cycle at $resolved');
+    }
+
+    try {
+      for (final line in XcconfigResolver._logicalLines(
+        file.readAsLinesSync(),
+      )) {
+        final include = _include.firstMatch(line);
+
+        if (include == null) {
+          _evaluation.apply(line);
+          continue;
+        }
+
+        final includedPath = include[2] ?? include[3];
+
+        readSync(
+          paths.normalize(paths.join(paths.dirname(resolved), includedPath)),
+          optional: include[1] == '?',
+        );
+      }
+    } finally {
+      _activeFiles.remove(resolved);
+    }
+  }
 
   Future<void> read(String path, {required bool optional}) async {
     final file = fileSystem.file(path);

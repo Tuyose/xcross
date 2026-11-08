@@ -1,5 +1,6 @@
 import 'package:cli_kit/shared/platform/platform_host.dart';
 import 'package:meta/meta.dart';
+import 'package:xcross/src/shared/flutter/build/internal/xcconfig_resolver.dart';
 import 'package:xcross/src/shared/flutter/build/ios_bundle_versions.dart';
 import 'package:xcross/src/shared/flutter/project/pbx_project_reader.dart';
 
@@ -23,32 +24,64 @@ final class IosBundleVersionsResolver {
     String baseConfiguration = 'Debug',
     String? flavor,
   }) {
-    final settings = _applicationBuildSettings(
+    final (settings, configuration) = _applicationBuildSettings(
       projectRoot,
       baseConfiguration,
       flavor,
     );
+    final projectName = _setting(settings, 'MARKETING_VERSION');
+    final projectNumber = _setting(settings, 'CURRENT_PROJECT_VERSION');
+
+    final needsConfig =
+        (buildName == null && projectName == null) ||
+        (buildNumber == null && projectNumber == null);
+
+    final flutterDirectory = projects.paths.join(projectRoot, 'ios', 'Flutter');
+
+    final config = needsConfig
+        ? XcconfigResolver(
+            fileSystem,
+            projects.paths,
+          ).readDebugConfigurationSync(
+            debugPath: projects.paths.join(
+              flutterDirectory,
+              '$baseConfiguration.xcconfig',
+            ),
+            configuration: configuration,
+            generatedPath: projects.paths.join(
+              flutterDirectory,
+              'Generated.xcconfig',
+            ),
+          )
+        : const <String, String>{};
+
     return IosBundleVersions(
       shortVersion:
           buildName ??
-          _setting(settings, 'MARKETING_VERSION') ??
+          projectName ??
+          _setting(config, 'FLUTTER_BUILD_NAME') ??
           IosBundleVersions.fallback.shortVersion,
       bundleVersion:
           buildNumber ??
-          _setting(settings, 'CURRENT_PROJECT_VERSION') ??
+          projectNumber ??
+          _setting(config, 'FLUTTER_BUILD_NUMBER') ??
           IosBundleVersions.fallback.bundleVersion,
     );
   }
 
-  Map<String, Object?> _applicationBuildSettings(
+  (Map<String, Object?>, String) _applicationBuildSettings(
     String projectRoot,
     String baseConfiguration,
     String? flavor,
   ) {
     final pbxprojPath = projects.findPbxproj(projectRoot);
-    if (pbxprojPath == null) return const {};
+    if (pbxprojPath == null) {
+      return (const <String, Object?>{}, baseConfiguration);
+    }
     final project = projects.parseFile(pbxprojPath);
-    if (project == null) return const {};
+    if (project == null) {
+      return (const <String, Object?>{}, baseConfiguration);
+    }
     final configuration = project.configurationName(baseConfiguration, flavor);
 
     Map<String, Object?>? fallbackSettings;
@@ -61,10 +94,12 @@ final class IosBundleVersionsResolver {
         target,
         preferredConfiguration: configuration,
       );
-      if (target.string('name') == 'Runner') return settings;
+      if (target.string('name') == 'Runner') {
+        return (settings, configuration);
+      }
       fallbackSettings ??= settings;
     }
-    return fallbackSettings ?? const {};
+    return (fallbackSettings ?? const <String, Object?>{}, configuration);
   }
 
   static String? _setting(Map<String, Object?> settings, String key) {
