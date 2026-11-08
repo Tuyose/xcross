@@ -25,6 +25,7 @@ class SigningAsset {
     required String certificatePemPath,
     required String provisioningProfilePath,
     Map<String, Object?> declaredEntitlements = const {},
+    bool requireAppStoreProfile = false,
     DateTime? now,
     @visibleForTesting List<Uint8List> trustedRootCertificates = const [],
   }) {
@@ -55,6 +56,13 @@ class SigningAsset {
     );
 
     final identity = _readIdentity(profile, provisioningProfilePath);
+    if (requireAppStoreProfile) {
+      _requireAppStoreProfile(
+        profile,
+        identity.entitlements,
+        provisioningProfilePath,
+      );
+    }
     final certificateChain = buildCertificateChain(
       leaf: certificate,
       profileCertificates: profileContent.certificates,
@@ -125,6 +133,22 @@ class SigningAsset {
   final String certificateCommonName;
   final ParsedCertificate _certificate;
   final List<Uint8List> _certificateChain;
+
+  static void _requireAppStoreProfile(
+    Map<String, Object?> profile,
+    Map<String, Object?> entitlements,
+    String profilePath,
+  ) {
+    if (entitlements['get-task-allow'] != false ||
+        entitlements['beta-reports-active'] != true ||
+        profile.containsKey('ProvisionedDevices') ||
+        profile['ProvisionsAllDevices'] == true) {
+      throw AppleError(
+        'Provisioning profile "$profilePath" is not an '
+        'App Store distribution profile.',
+      );
+    }
+  }
 
   /// Refuses a key and certificate that do not describe the same RSA pair.
   static void _requireKeyMatchesCertificate(
@@ -378,6 +402,7 @@ final class SigningAssetLoader {
     required String certificatePemPath,
     required String provisioningProfilePath,
     Map<String, Object?> declaredEntitlements = const {},
+    bool requireAppStoreProfile = false,
     DateTime? now,
     @visibleForTesting List<Uint8List> trustedRootCertificates = const [],
   }) async => SigningAsset.fromBytes(
@@ -391,6 +416,7 @@ final class SigningAssetLoader {
     certificatePemPath: certificatePemPath,
     provisioningProfilePath: provisioningProfilePath,
     declaredEntitlements: declaredEntitlements,
+    requireAppStoreProfile: requireAppStoreProfile,
     now: now,
     trustedRootCertificates: trustedRootCertificates,
   );

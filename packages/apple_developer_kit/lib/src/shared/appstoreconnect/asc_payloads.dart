@@ -64,10 +64,11 @@ abstract final class AscPayloads {
     required String bundleIdResourceId,
     required List<String> certificateResourceIds,
     required List<String> deviceResourceIds,
+    String profileType = 'IOS_APP_DEVELOPMENT',
   }) => {
     'data': {
       'type': 'profiles',
-      'attributes': {'name': name, 'profileType': 'IOS_APP_DEVELOPMENT'},
+      'attributes': {'name': name, 'profileType': profileType},
       'relationships': {
         'bundleId': {
           'data': {'type': 'bundleIds', 'id': bundleIdResourceId},
@@ -78,11 +79,12 @@ abstract final class AscPayloads {
               {'type': 'certificates', 'id': id},
           ],
         },
-        'devices': {
-          'data': [
-            for (final id in deviceResourceIds) {'type': 'devices', 'id': id},
-          ],
-        },
+        if (profileType != 'IOS_APP_STORE')
+          'devices': {
+            'data': [
+              for (final id in deviceResourceIds) {'type': 'devices', 'id': id},
+            ],
+          },
       },
     },
   };

@@ -53,6 +53,35 @@ void main() {
     },
   );
 
+  test('development quota must not revoke distribution certificate', () async {
+    final temp = Directory.systemTemp.createTempSync('xcross_cert_safety');
+    addTearDown(() => temp.deleteSync(recursive: true));
+
+    final client = FakeProvisioningClient(
+      quotaUsedBy: const ['old-development', 'distribution-cert'],
+    );
+
+    await expectLater(
+      AscProvisioning(
+        hostServices: testHostServices,
+        client: client,
+      ).provisionDevelopmentIdentity(
+        bundleId: 'com.example.app',
+        deviceUdids: const ['UDID'],
+        outputDir: temp.path,
+      ),
+      throwsA(
+        isA<AppleApiError>().having(
+          (error) => error.statusCode,
+          'statusCode',
+          409,
+        ),
+      ),
+    );
+
+    expect(client.revoked, isEmpty);
+    expect(client.certificateCreations, 1);
+  });
   group('wrapDerAsPem', () {
     test('wraps base64 DER content into a line-wrapped PEM block', () {
       final der = base64.encode(List<int>.generate(200, (i) => i % 256));
@@ -327,25 +356,31 @@ void main() {
     expect(warnings, anyElement(contains('App Groups')));
   });
 
-  test('revokes team certificates and reissues on create 409', () async {
+  test('surfaces 409 without revoking or retrying certificates', () async {
     final temp = Directory.systemTemp.createTempSync('xcross_cert_409');
     addTearDown(() => temp.deleteSync(recursive: true));
     final client = FakeProvisioningClient(quotaUsedBy: const ['old-cert']);
 
-    final result =
-        await AscProvisioning(
-          hostServices: testHostServices,
-          client: client,
-        ).provisionDevelopmentIdentity(
-          bundleId: 'com.example.app',
-          deviceUdids: const ['UDID'],
-          outputDir: temp.path,
-        );
+    await expectLater(
+      AscProvisioning(
+        hostServices: testHostServices,
+        client: client,
+      ).provisionDevelopmentIdentity(
+        bundleId: 'com.example.app',
+        deviceUdids: const ['UDID'],
+        outputDir: temp.path,
+      ),
+      throwsA(
+        isA<AppleApiError>().having(
+          (error) => error.statusCode,
+          'statusCode',
+          409,
+        ),
+      ),
+    );
 
-    expect(client.revoked, ['old-cert']);
-    expect(client.certificateCreations, 2, reason: 'retried after revoking');
-    expect(File(result.certificatePemPath).existsSync(), isTrue);
-    expect(File(result.privateKeyPemPath).existsSync(), isTrue);
+    expect(client.revoked, isEmpty);
+    expect(client.certificateCreations, 1);
   });
 
   test('surfaces the 409 when there is nothing to revoke', () async {
@@ -390,7 +425,11 @@ void main() {
     addTearDown(() => temp.deleteSync(recursive: true));
     final client = FakeProvisioningClient(
       existingProfiles: const [
-        AscProfileRef(id: 'old-profile', name: 'xcross Development 1'),
+        AscProfileRef(
+          id: 'old-profile',
+          name: 'xcross Development 1',
+          profileType: 'IOS_APP_DEVELOPMENT',
+        ),
       ],
     );
 
@@ -463,6 +502,52 @@ void main() {
     },
   );
 
+  test('never deletes App Store profile with xcross-like name', () async {
+    final temp = Directory.systemTemp.createTempSync('xcross_release_safety');
+    addTearDown(() => temp.deleteSync(recursive: true));
+
+    final client = FakeProvisioningClient(
+      existingProfiles: const [
+        AscProfileRef(
+          id: 'release-profile',
+          name: 'xcross Development 1',
+          profileType: 'IOS_APP_STORE',
+        ),
+      ],
+    );
+
+    await AscProvisioning(
+      hostServices: testHostServices,
+      client: client,
+    ).provisionDevelopmentIdentity(
+      bundleId: 'com.example.app',
+      deviceUdids: const ['UDID'],
+      outputDir: temp.path,
+    );
+
+    expect(client.deletedProfiles, isEmpty);
+  });
+  test('never deletes profile with unknown type', () async {
+    final temp = Directory.systemTemp.createTempSync('xcross_unknown_profile');
+    addTearDown(() => temp.deleteSync(recursive: true));
+
+    final client = FakeProvisioningClient(
+      existingProfiles: const [
+        AscProfileRef(id: 'unknown-profile', name: 'xcross Development 1'),
+      ],
+    );
+
+    await AscProvisioning(
+      hostServices: testHostServices,
+      client: client,
+    ).provisionDevelopmentIdentity(
+      bundleId: 'com.example.app',
+      deviceUdids: const ['UDID'],
+      outputDir: temp.path,
+    );
+
+    expect(client.deletedProfiles, isEmpty);
+  });
   test('keeps a profile xcross did not create', () async {
     final temp = Directory.systemTemp.createTempSync('xcross_profile_keep');
     addTearDown(() => temp.deleteSync(recursive: true));
@@ -490,7 +575,7 @@ void main() {
     expect(client.deletedProfiles, isEmpty);
   });
 
-  test('replaces a lone development profile another tool created', () async {
+  test('preserves a lone development profile another tool created', () async {
     final temp = Directory.systemTemp.createTempSync('xcross_profile_dev');
     addTearDown(() => temp.deleteSync(recursive: true));
     final client = FakeProvisioningClient(
@@ -512,7 +597,7 @@ void main() {
       outputDir: temp.path,
     );
 
-    expect(client.deletedProfiles, ['xcode-profile']);
+    expect(client.deletedProfiles, isEmpty);
   });
 
   // The profile xcross creates and the profile it is later willing to delete

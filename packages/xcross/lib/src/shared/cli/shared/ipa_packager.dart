@@ -4,12 +4,19 @@ import 'package:archive/archive_io.dart';
 import 'package:cli_kit/shared/platform/platform_host.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
-import 'package:xcross/src/shared/cli/shared/host_file_handle.dart';
 
 /// Groups `.ipa` packaging.
 @internal
 final class IpaPackager {
-  const IpaPackager({required this.host});
+  const IpaPackager({required this.host, this.renameFileForTesting});
+
+  /// Injects file move failures in tests; production uses File.rename.
+  @visibleForTesting
+  final Future<File> Function(File file, String destination)?
+  renameFileForTesting;
+
+  Future<File> _renameFile(File file, String destination) =>
+      renameFileForTesting?.call(file, destination) ?? file.rename(destination);
 
   final PlatformHostInterface host;
 
@@ -27,56 +34,80 @@ final class IpaPackager {
       '${paths.basenameWithoutExtension(appPath)}.ipa',
     );
     final ipaFile = host.fileSystem.file(ipaPath);
-    if (ipaFile.existsSync()) ipaFile.deleteSync();
 
-    // Entries are streamed from disk one at a time, so peak memory stays at
-    // one compression buffer instead of the whole app plus the zip. Sorted
-    // for a deterministic entry order. `list()` follows symlinks by default,
-    // so they resolve to real files.
+    final archive = Archive();
+    // list() follows symlinks by default → they resolve to real files/dirs.
     final files = <File>[
       await for (final entity in appDir.list(recursive: true))
         if (entity is File) entity,
     ]..sort((a, b) => a.path.compareTo(b.path));
 
-    final output = OutputFileStream.withFileHandle(
-      HostRandomAccessFileHandle.write(ipaFile),
-    );
-    final encoder = ZipEncoder()..startEncode(output);
+    for (final entity in files) {
+      final rel = paths.relative(entity.path, from: appDir.path);
+      final entryName = p.posix.joinAll([
+        'Payload',
+        appName,
+        ...paths.split(rel),
+      ]);
+      final bytes = await entity.readAsBytes();
+      final file = ArchiveFile.bytes(entryName, bytes);
+
+      file.mode = entryMode(entity.statSync().mode, bytes);
+      archive.addFile(file);
+    }
+
+    final zipBytes = ZipEncoder().encode(archive);
+
+    // Stage the complete archive before touching a previous IPA.
+    final stagingDir = await host.fileSystem
+        .directory(paths.dirname(ipaPath))
+        .createTemp('.xcross-ipa-');
+
+    var preserveRecoveryFiles = false;
+
     try {
-      for (final file in files) {
-        final rel = paths.relative(file.path, from: appDir.path);
-        final entryName = p.posix.joinAll([
-          'Payload',
-          appName,
-          ...paths.split(rel),
-        ]);
-        final stat = file.statSync();
-        final input = InputFileStream.withFileHandle(
-          HostRandomAccessFileHandle.read(file),
-        );
-        try {
-          final entry = ArchiveFile.stream(entryName, input)
-            ..mode = entryMode(stat.mode, await _header(file))
-            ..lastModTime = stat.modified.millisecondsSinceEpoch ~/ 1000;
-          encoder.add(entry);
-        } finally {
-          await input.close();
+      final staged = host.fileSystem.file(
+        paths.join(stagingDir.path, 'new.ipa'),
+      );
+      final backup = host.fileSystem.file(
+        paths.join(stagingDir.path, 'previous.ipa'),
+      );
+
+      await staged.writeAsBytes(zipBytes, flush: true);
+
+      if (ipaFile.existsSync()) {
+        await _renameFile(ipaFile, host.paths.ioPath(backup.path));
+      }
+
+      try {
+        await _renameFile(staged, host.paths.ioPath(ipaFile.path));
+      } catch (publishError, publishTrace) {
+        if (backup.existsSync()) {
+          try {
+            await _renameFile(backup, host.paths.ioPath(ipaFile.path));
+          } catch (restoreError) {
+            // Never delete the only surviving copy of the previous IPA.
+            preserveRecoveryFiles = true;
+
+            throw FileSystemException(
+              'IPA publishing and rollback both failed. '
+              'Previous IPA preserved at "${backup.path}". '
+              'Publish error: $publishError; '
+              'restore error: $restoreError',
+              ipaPath,
+            );
+          }
         }
+
+        Error.throwWithStackTrace(publishError, publishTrace);
       }
     } finally {
-      encoder.endEncode();
-      await output.close();
+      if (!preserveRecoveryFiles) {
+        await stagingDir.delete(recursive: true);
+      }
     }
-    return ipaPath;
-  }
 
-  static Future<List<int>> _header(File file) async {
-    final raf = await file.open();
-    try {
-      return await raf.read(4);
-    } finally {
-      await raf.close();
-    }
+    return ipaPath;
   }
 
   /// Unix mode recorded for an IPA entry.

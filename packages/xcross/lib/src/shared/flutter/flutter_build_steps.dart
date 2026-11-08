@@ -26,8 +26,12 @@ final class FlutterBuildRequest<T extends PlatformHostInterface> {
   }) : appName = runtime.pubspecs.loadSync(projectRoot).name,
        versions = runtime.versions.resolve(
          projectRoot,
-         buildName: options.buildName,
-         buildNumber: options.buildNumber,
+         buildName:
+             options.buildName ??
+             runtime.pubspecs.loadSync(projectRoot).buildName,
+         buildNumber:
+             options.buildNumber ??
+             runtime.pubspecs.loadSync(projectRoot).buildNumber,
          baseConfiguration: xcodeBaseConfiguration(options.buildMode),
          flavor: options.flavor,
        );

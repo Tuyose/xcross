@@ -11,6 +11,7 @@ import 'package:xcross/src/shared/flutter/build/internal/staged_directory_swap.d
 import 'package:xcross/src/shared/flutter/build/ios_bundle_resources.dart';
 import 'package:xcross/src/shared/flutter/build/ios_bundle_versions.dart';
 import 'package:xcross/src/shared/flutter/build/ios_deployment_target.dart';
+import 'package:xcross/src/shared/flutter/build/pbxproj.dart';
 import 'package:xcross/src/shared/flutter/constants.dart';
 import 'package:xcross/src/shared/flutter/extensions/app_extension_plist.dart';
 import 'package:xcross/src/shared/flutter/flutter_build_runtime.dart';
@@ -359,6 +360,21 @@ final class FlutterBundleAssembler<T extends PlatformHostInterface>
   /// Generate and write `Info.plist` into [bundleDir] with `$(VAR)`
   /// substitution, mandatory iOS keys, compiled app icon and launch screen,
   /// storyboard stripping, and ObjC class name normalization.
+  @visibleForTesting
+  String alignAppBundleVersions(String expandedPlist) {
+    final plistXml = PlistMutations.setPlistString(
+      expandedPlist,
+      'CFBundleShortVersionString',
+      _versions.shortVersion,
+    );
+
+    return PlistMutations.setPlistString(
+      plistXml,
+      'CFBundleVersion',
+      _versions.bundleVersion,
+    );
+  }
+
   Future<void> _writeInfoPlist(
     String bundleDir, {
     required IosDeploymentTarget deploymentTarget,
@@ -376,22 +392,7 @@ final class FlutterBundleAssembler<T extends PlatformHostInterface>
       plistXml,
       await buildSubstitutionMap(sdkName: sdkName),
     );
-    if (options.buildName != null ||
-        !plistXml.contains('<key>CFBundleShortVersionString</key>')) {
-      plistXml = PlistMutations.setPlistString(
-        plistXml,
-        'CFBundleShortVersionString',
-        _versions.shortVersion,
-      );
-    }
-    if (options.buildNumber != null ||
-        !plistXml.contains('<key>CFBundleVersion</key>')) {
-      plistXml = PlistMutations.setPlistString(
-        plistXml,
-        'CFBundleVersion',
-        _versions.bundleVersion,
-      );
-    }
+    plistXml = alignAppBundleVersions(plistXml);
     plistXml = InfoPlist.applyIosRequiredKeys(
       plistXml,
       bundleId: bundleId,
@@ -538,16 +539,27 @@ final class FlutterBundleAssembler<T extends PlatformHostInterface>
       'Flutter',
     );
     final overrides = _buildVersionOverrides();
+
+    final baseConfiguration = xcodeBaseConfiguration(options.buildMode);
+    final pbxprojPath = runtime.projects.findPbxproj(projectRoot);
+    final pbxProject = pbxprojPath == null
+        ? null
+        : runtime.projects.parseFile(pbxprojPath);
+    final selectedConfiguration =
+        pbxProject?.configurationName(baseConfiguration, options.flavor) ??
+        baseConfiguration;
+
     subs.addAll(
       await runtime.xcconfigs.readDebugConfiguration(
         debugPath: runtime.host.paths.context.join(
           flutterConfigDirectory,
-          'Debug.xcconfig',
+          '${xcodeBaseConfiguration(options.buildMode)}.xcconfig',
         ),
         generatedPath: runtime.host.paths.context.join(
           flutterConfigDirectory,
           'Generated.xcconfig',
         ),
+        configuration: selectedConfiguration,
         sdk: selectedSdk,
         defaults: subs,
         overrides: overrides,
@@ -560,13 +572,9 @@ final class FlutterBundleAssembler<T extends PlatformHostInterface>
 
   /// Settings pinned by explicit `--build-name` / `--build-number` flags.
   Map<String, String> _buildVersionOverrides() => {
-    if (options.buildName case final String name) ...{
-      'FLUTTER_BUILD_NAME': name,
-      'MARKETING_VERSION': name,
-    },
-    if (options.buildNumber case final String number) ...{
-      'FLUTTER_BUILD_NUMBER': number,
-      'CURRENT_PROJECT_VERSION': number,
-    },
+    'FLUTTER_BUILD_NAME': _versions.shortVersion,
+    'MARKETING_VERSION': _versions.shortVersion,
+    'FLUTTER_BUILD_NUMBER': _versions.bundleVersion,
+    'CURRENT_PROJECT_VERSION': _versions.bundleVersion,
   };
 }

@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:xcross/src/shared/apple/asset_catalog/asset_catalog.dart';
 import 'package:xcross/src/shared/artifact/plist_mutations.dart';
+import 'package:xml/xml.dart';
 
 /// `CFBundleIcons` / `CFBundleIcons~ipad` produced by [AppIconStager].
 @internal
@@ -64,6 +65,51 @@ final class AppIconPlist {
   static String applyToInfoPlist(String plistXml, AppIconPlist icons) {
     var xml = PlistMutations.removePlistKey(plistXml, 'CFBundleIcons');
     xml = PlistMutations.removePlistKey(xml, 'CFBundleIcons~ipad');
+
+    String? primaryName;
+    for (final entry in [
+      icons.cfBundleIcons['CFBundlePrimaryIcon'],
+      icons.cfBundleIconsIpad?['CFBundlePrimaryIcon'],
+    ]) {
+      if (entry is! Map) continue;
+      final value = entry['CFBundleIconName'];
+      if (value is String && value.isNotEmpty) {
+        primaryName = value;
+        break;
+      }
+    }
+
+    if (primaryName != null) {
+      final document = XmlDocument.parse(xml);
+      final root = document.rootElement.getElement('dict');
+      if (root == null) {
+        throw const FormatException('Info.plist missing root dict');
+      }
+
+      final nodes = root.childElements.toList();
+      for (var i = 0; i + 1 < nodes.length; i++) {
+        if (nodes[i].name.local != 'key' ||
+            nodes[i].innerText != 'CFBundleIconName') {
+          continue;
+        }
+        root.children
+          ..remove(nodes[i])
+          ..remove(nodes[i + 1]);
+        i++;
+      }
+
+      root.children
+        ..add(
+          XmlElement(const XmlName.parts('key'), [], [
+            XmlText('CFBundleIconName'),
+          ]),
+        )
+        ..add(
+          XmlElement(const XmlName.parts('string'), [], [XmlText(primaryName)]),
+        );
+      xml = document.toXmlString();
+    }
+
     return PlistMutations.insertBeforeEnd(xml, icons.toXmlFragment());
   }
 }

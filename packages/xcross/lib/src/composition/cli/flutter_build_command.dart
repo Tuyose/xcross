@@ -4,6 +4,8 @@ library;
 import 'package:build_cli_annotations/build_cli_annotations.dart';
 import 'package:cli_kit/shared/platform/platform_host.dart';
 import 'package:meta/meta.dart';
+import 'package:xcross/src/composition/flutter/app_store_ipa_output_guard.dart';
+import 'package:xcross/src/composition/flutter/app_store_ipa_signing_operation.dart';
 import 'package:xcross/src/composition/ios_target.dart';
 import 'package:xcross/src/shared/cli/internal/parsed_command.dart';
 import 'package:xcross/src/shared/cli/shared/ipa_packager.dart';
@@ -116,6 +118,12 @@ final class FlutterBuildArgs extends CommonFlutterArgs {
     help: 'Output a .ipa file instead of a .app.',
   )
   late bool ipa;
+
+  @CliOption(
+    negatable: false,
+    help: 'Sign a release IPA for App Store distribution.',
+  )
+  late bool appStore;
 }
 
 /// `xcross flutter build` — build a Flutter iOS `.app` (optionally ipa).
@@ -148,6 +156,15 @@ final class FlutterBuildCommand<T extends PlatformHostInterface>
       release: options.release,
       usageException: usageException,
     );
+    if (options.appStore &&
+        (!options.ipa ||
+            mode != FlutterBuildMode.release ||
+            options.targetPlatform != 'iphone')) {
+      usageException(
+        '--app-store requires --release --ipa --target-platform iphone.',
+      );
+    }
+
     final features = composeBuildFeatures(
       options.targetPlatform,
       runtime,
@@ -155,6 +172,18 @@ final class FlutterBuildCommand<T extends PlatformHostInterface>
     );
     final buildRuntime = features.flutterRuntime;
     final projectRoot = runtime.host.paths.context.current;
+    if (options.appStore) {
+      final archived = await AppStoreIpaOutputGuard(host: runtime.host)
+          .archiveExisting(
+            outputDirectory: buildRuntime.policy.outputDirectory(projectRoot),
+            appName: buildRuntime.pubspecs.loadSync(projectRoot).name,
+          );
+
+      if (archived != null) {
+        runtime.log.logWarn('Previous IPA archived at $archived');
+      }
+    }
+
     final buildOptions = await buildRuntime.options.resolve(
       target: options.target,
       dartDefine: options.dartDefine,
@@ -175,6 +204,12 @@ final class FlutterBuildCommand<T extends PlatformHostInterface>
       runtime: buildRuntime,
       options: buildOptions,
     );
+
+    if (options.appStore) {
+      await AppStoreIpaSigningOperation(
+        runtime,
+      ).sign(appPath: result.appPath, bundleId: result.bundleId);
+    }
 
     final finalPath = options.ipa
         ? await IpaPackager(host: runtime.host).package(result.appPath)
