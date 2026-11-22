@@ -244,6 +244,23 @@ void main() {
           return http.Response('', 204);
         }
 
+        if (request.method == 'GET' && path == '/v1/bundleIds') {
+          return http.Response(
+            jsonEncode({
+              'data': [
+                {
+                  'id': 'bundle-1',
+                  'attributes': {
+                    'identifier': 'com.example.app',
+                    'name': 'Example',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }
+
         if (request.method == 'POST' && path == '/v1/certificates') {
           certificateCreations++;
           return http.Response(
@@ -596,7 +613,7 @@ void main() {
           final data = body['data'] as Map;
           final attributes = data['attributes'] as Map;
           expect(attributes['identifier'], 'com.example.unregistered');
-          expect(attributes['name'], 'xcross unregistered');
+          expect(attributes['name'], 'xcross com example unregistered');
           return http.Response(
             jsonEncode({
               'data': {

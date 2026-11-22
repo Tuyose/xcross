@@ -24,6 +24,8 @@ void main() {
   void writeBundleId(String? id) {
     File(p.join(appPath, 'Info.plist')).writeAsStringSync(
       '<?xml version="1.0" encoding="UTF-8"?>'
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+      '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
       '<plist version="1.0"><dict>'
       '${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}'
       '</dict></plist>',
@@ -71,6 +73,8 @@ void main() {
     Directory(extensionPath).createSync(recursive: true);
     File(p.join(extensionPath, 'Info.plist')).writeAsStringSync(
       '<?xml version="1.0" encoding="UTF-8"?>'
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+      '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
       '<plist version="1.0"><dict>'
       '${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}'
       '</dict></plist>',
