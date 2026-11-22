@@ -23,7 +23,8 @@ void main() {
 
   void writeBundleId(String? id) {
     File(p.join(appPath, 'Info.plist')).writeAsStringSync(
-      '<plist><dict>'
+      '<?xml version="1.0" encoding="UTF-8"?>'
+      '<plist version="1.0"><dict>'
       '${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}'
       '</dict></plist>',
     );
@@ -69,7 +70,8 @@ void main() {
     final extensionPath = p.join(appPath, 'PlugIns', '$name.appex');
     Directory(extensionPath).createSync(recursive: true);
     File(p.join(extensionPath, 'Info.plist')).writeAsStringSync(
-      '<plist><dict>'
+      '<?xml version="1.0" encoding="UTF-8"?>'
+      '<plist version="1.0"><dict>'
       '${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}'
       '</dict></plist>',
     );
