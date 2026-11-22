@@ -81,21 +81,28 @@ void main() {
     );
   }
 
+  String comparablePath(String path) {
+    const windowsDevicePrefix = '\\\\?\\';
+    if (Platform.isWindows && path.startsWith(windowsDevicePrefix)) {
+      return path.substring(windowsDevicePrefix.length);
+    }
+    return path;
+  }
+
   test('discovers each embedded extension Bundle ID', () {
     writeExtension('Share', 'com.example.app.share');
     writeExtension('Widget', 'com.example.app.widget');
 
-    expect(
-      AppStoreIpaSigningOperation.embeddedExtensions(
-        appPath: appPath,
-        fileSystem: host.fileSystem,
-        paths: host.paths,
-      ),
-      {
-        'com.example.app.share': p.join(appPath, 'PlugIns', 'Share.appex'),
-        'com.example.app.widget': p.join(appPath, 'PlugIns', 'Widget.appex'),
-      },
-    );
+    final extensions = AppStoreIpaSigningOperation.embeddedExtensions(
+      appPath: appPath,
+      fileSystem: host.fileSystem,
+      paths: host.paths,
+    ).map((bundleId, path) => MapEntry(bundleId, comparablePath(path)));
+
+    expect(extensions, {
+      'com.example.app.share': p.join(appPath, 'PlugIns', 'Share.appex'),
+      'com.example.app.widget': p.join(appPath, 'PlugIns', 'Widget.appex'),
+    });
   });
 
   test('rejects an embedded extension without Info.plist', () {
