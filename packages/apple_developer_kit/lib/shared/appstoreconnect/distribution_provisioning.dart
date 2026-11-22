@@ -5,6 +5,7 @@ import 'package:apple_developer_kit/shared/appstoreconnect/appstoreconnect.dart'
 import 'package:apple_developer_kit/shared/appstoreconnect/asc_client.dart';
 import 'package:apple_developer_kit/shared/appstoreconnect/distribution_certificate_validator.dart';
 import 'package:apple_developer_kit/shared/errors/errors.dart';
+import 'package:apple_developer_kit/shared/appstoreconnect/provisioning_identifiers.dart';
 import 'package:apple_developer_kit/src/shared/appstoreconnect/asc_csr.dart';
 import 'package:apple_developer_kit/src/shared/secure/secure_file.dart';
 
@@ -58,13 +59,7 @@ final class AscDistributionProvisioning {
       }
     }
 
-    final bundle = await client.findBundleId(bundleId);
-    if (bundle == null) {
-      throw AppleError(
-        'Bundle ID "$bundleId" is not registered with Apple. '
-        'Register it before creating a Distribution identity.',
-      );
-    }
+    final bundle = await _findOrRegisterBundleId(bundleId);
 
     await fs.directory(identityDir).create(recursive: true);
     await fs.directory(outputDir).create(recursive: true);
@@ -199,10 +194,7 @@ final class AscDistributionProvisioning {
       expectedSerialNumber: serial,
     );
 
-    final bundle = await client.findBundleId(bundleId);
-    if (bundle == null) {
-      throw AppleError('Bundle ID "$bundleId" is not registered with Apple.');
-    }
+    final bundle = await _findOrRegisterBundleId(bundleId);
 
     final certificateIds = await client.findCertificateIdsBySerial(serial);
 
@@ -231,5 +223,28 @@ final class AscDistributionProvisioning {
       privateKeyPemPath: keyPath,
       profilePath: profilePath,
     );
+  }
+
+  /// App Store builds may contain an extension whose App ID has never been
+  /// used on this team. Register it before creating its distribution profile,
+  /// just as the development provisioning flow does. The API key must have
+  /// permission to manage Identifiers; existing identifiers are reused.
+  Future<AscBundleId> _findOrRegisterBundleId(String bundleId) async {
+    final existing = await client.findBundleId(bundleId);
+    if (existing != null) return existing;
+
+    try {
+      return await client.registerBundleId(
+        identifier: bundleId,
+        name: ProvisioningIdentifiers.appName(bundleId),
+      );
+    } on AppleApiError catch (error) {
+      // Two CI jobs can race before either GET sees the newly created App ID.
+      // Reuse the winner's resource instead of failing a harmless 409.
+      if (error.statusCode != 409) rethrow;
+      final raced = await client.findBundleId(bundleId);
+      if (raced == null) rethrow;
+      return raced;
+    }
   }
 }

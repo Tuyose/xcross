@@ -244,23 +244,6 @@ void main() {
           return http.Response('', 204);
         }
 
-        if (request.method == 'GET' && path == '/v1/bundleIds') {
-          return http.Response(
-            jsonEncode({
-              'data': [
-                {
-                  'id': 'bundle-1',
-                  'attributes': {
-                    'identifier': 'com.example.app',
-                    'name': 'Example',
-                  },
-                },
-              ],
-            }),
-            200,
-          );
-        }
-
         if (request.method == 'POST' && path == '/v1/certificates') {
           certificateCreations++;
           return http.Response(
@@ -588,6 +571,10 @@ void main() {
         }
 
         if (request.method == 'GET' && path == '/v1/bundleIds') {
+          if (request.url.queryParameters['filter[identifier]'] ==
+              'com.example.unregistered') {
+            return http.Response(jsonEncode({'data': []}), 200);
+          }
           return http.Response(
             jsonEncode({
               'data': [
@@ -601,6 +588,26 @@ void main() {
               ],
             }),
             200,
+          );
+        }
+
+        if (request.method == 'POST' && path == '/v1/bundleIds') {
+          final body = jsonDecode(request.body) as Map;
+          final data = body['data'] as Map;
+          final attributes = data['attributes'] as Map;
+          expect(attributes['identifier'], 'com.example.unregistered');
+          expect(attributes['name'], 'xcross unregistered');
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'id': 'bundle-3',
+                'attributes': {
+                  'identifier': 'com.example.unregistered',
+                  'name': 'xcross unregistered',
+                },
+              },
+            }),
+            201,
           );
         }
 
@@ -628,7 +635,11 @@ void main() {
 
           expect(
             bundleData['id'],
-            profileCreations == 1 ? 'bundle-1' : 'bundle-2',
+            profileCreations == 1
+                ? 'bundle-1'
+                : profileCreations == 2
+                ? 'bundle-2'
+                : 'bundle-3',
           );
 
           expect(attributes['profileType'], 'IOS_APP_STORE');
@@ -735,30 +746,26 @@ void main() {
 
     expect(certificateCreations, 1);
     expect(profileCreations, 2);
-    // An unregistered Bundle ID must not create a profile.
-    final rejectedDir = p.join(temp.path, 'unregistered-profile');
+    // A new target Bundle ID is registered before its profile is created.
+    final registeredDir = Directory(p.join(temp.path, 'registered-profile'))
+      ..createSync();
 
-    await expectLater(
-      provisioning.provisionProfileForExistingIdentity(
-        bundleId: 'com.example.unregistered',
-        identityDir: identityDir.path,
-        outputDir: rejectedDir,
-      ),
-      throwsA(
-        isA<AppleError>().having(
-          (error) => error.message,
-          'message',
-          contains('not registered'),
-        ),
-      ),
+    final registered = await provisioning.provisionProfileForExistingIdentity(
+      bundleId: 'com.example.unregistered',
+      identityDir: identityDir.path,
+      outputDir: registeredDir.path,
     );
 
+    expect(registered.profilePath, isNotEmpty);
+    expect(File(registered.profilePath).readAsBytesSync(), [4, 5, 6]);
     expect(
       File(
-        p.join(rejectedDir, 'distribution-profile.mobileprovision'),
+        p.join(registeredDir.path, 'distribution-profile.mobileprovision'),
       ).existsSync(),
-      isFalse,
+      isTrue,
     );
+
+    expect(profileCreations, 3);
 
     // Invalid identity state must be rejected without replacing files.
     final stateFile = File(p.join(identityDir.path, 'distribution-state.json'));
@@ -827,6 +834,6 @@ void main() {
 
     expect(stateFile.readAsBytesSync(), originalState);
     expect(certificateCreations, 1);
-    expect(profileCreations, 2);
+    expect(profileCreations, 3);
   });
 }

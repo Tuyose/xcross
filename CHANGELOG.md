@@ -1,5 +1,14 @@
 ## Unreleased
 
+- App Store release signing now discovers direct embedded app extensions,
+  creates/reuses a separate App ID and App Store provisioning profile for each
+  extension, and signs the host and extensions with their matching
+  entitlements.
+- Add a reusable Windows TestFlight pipeline script that serializes local
+  runs, builds through xcross, uploads through the official App Store Connect
+  Build Upload API, commits the IPA checksum and can wait for VALID processing.
+- Add a self-hosted Windows GitHub Actions template with
+  cancel-in-progress disabled so a later commit waits for an active upload.
 - Flutter IPAs built on Windows and Linux now carry the app icon, launch screen, asset catalog and entitlements the way Xcode builds them. A pure-Dart `actool` compiles the app's image, color and app icon sets (including dark, tinted and alternate icons) into an LZFSE-compressed `Assets.car` and writes the same loose icons, `CFBundleIcons` and `NSAccentColorName` keys. A pure-Dart `ibtool` compiles simple launch storyboards into `Base.lproj/LaunchScreen.storyboardc`, keeping `UILaunchStoryboardName`; others fall back to `UILaunchScreen` with a warning. Device builds embed the target's `CODE_SIGN_ENTITLEMENTS` (and extensions' own) in the ad-hoc signature, and `xcross flutter run` enables the matching App ID capabilities. `UIDeviceFamily` follows `TARGETED_DEVICE_FAMILY`, and `PkgInfo`, the `DT*` Xcode/SDK keys and SwiftPM plugin resource bundles (privacy manifests) are added as Xcode does: resources copied from their sources (so SDWebImage's symlinked privacy manifest is a real file again), only bundles of linked targets, Xcode's bundle `Info.plist`, `.xib` resources compiled to the `.nib` `ibtool` writes, and repository line endings on Windows. The project's `AppDelegate.swift` and `SceneDelegate.swift` are still not compiled, which the README now documents. ([#149](https://github.com/arxdeus/xcross/issues/149))
 
 ## 2.0.9

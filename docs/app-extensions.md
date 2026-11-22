@@ -1,7 +1,9 @@
 # iOS app extensions
 
 xcross builds, embeds, signs and installs iOS **app extensions** (share
-extensions, action extensions) alongside the host app, without Xcode.
+extensions, action extensions and widgets) alongside the host app, without
+Xcode. App Store distribution builds use a separate App ID, distribution
+profile and entitlement set for every embedded .appex.
 
 This is what makes plugins like
 [receive_sharing_intent](https://github.com/KasemJaffer/receive_sharing_intent)
@@ -131,7 +133,12 @@ route was checked against a live key:
 
 **But you can still use one.** xcross reads the group out of the issued
 profile rather than assuming, so a group attached to your App IDs by any other
-means flows straight through:
+means flows straight through. This applies to both device signing and
+xcross flutter build ipa --release --ipa --target-platform iphone --app-store.
+The App Store signing path discovers every direct PlugIns/*.appex, registers
+missing Bundle IDs, creates an App Store profile for each target and signs
+each target with its own profile. The host app and every extension must belong
+to the same Apple team.
 
 1. Add the App Group to the app's App ID **and every extension's** — in Xcode
    (Signing & Capabilities) or at
@@ -145,6 +152,17 @@ XCROSS_APP_GROUP=group.com.example.Shared xcross flutter run
 `XCROSS_APP_GROUP` skips the per-account rewrite described above, because the
 group already exists and is already yours. From then on the full share flow
 works on an API key.
+
+The API key used by an App Store build must be allowed to manage identifiers,
+certificates and profiles. If the key cannot create a missing extension Bundle
+ID, register that identifier first in App Store Connect. xcross never copies
+certificates, private keys or profiles into the project.
+
+After the IPA is signed, upload it from Windows with the reusable
+tool/testflight.ps1 script. It performs the official App Store Connect
+sequence: create a build upload, reserve the IPA file, send every upload
+operation, commit the MD5 checksum, and optionally poll until processing is
+VALID. No Transporter, Xcode or Mac is required.
 
 If no group is provisioned, xcross says so once and leaves the entitlement
 out, because signing with an ungranted group is what produces `0xe8008015`.

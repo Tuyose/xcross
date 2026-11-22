@@ -21,6 +21,67 @@ No Mac. No Xcode. No WSL.
 
 xcross reimplements the Flutter iOS build pipeline and the iOS 17+ CoreDevice launch protocol in pure Dart. It compiles your Flutter app with the official Swift and LLVM toolchains, signs it with your Apple ID or an App Store Connect API key, installs it on a physical iPhone, launches it, and gives you full hot reload - all from a Windows or Linux machine.
 
+## Windows App Store and TestFlight path
+
+This fork also carries the Windows distribution path that is useful when a
+project has SwiftPM plugins or embedded app extensions:
+
+- repairs Windows SwiftPM resource bundle accessors without modifying the
+  project's Package.swift;
+- provides static framework stubs for Flutter plugin graphs that need them;
+- builds Flutter release AOT output, the app bundle and an unsigned IPA on
+  Windows with the selected Flutter, Swift, LLVM and Darwin SDK toolchains;
+- validates the Apple Distribution certificate, private key, provisioning
+  profile and entitlement relationship before signing;
+- signs the host app and every direct PlugIns/*.appex with its own App ID,
+  App Store profile and entitlements;
+- uploads an already signed IPA through Apple's official Build Upload API with
+  tool/testflight.ps1, including upload-operation handling, MD5 commit and
+  optional processing polling.
+
+The pipeline is project-independent. It does not contain a certificate,
+private key, provisioning profile or bundle ID. App Store Connect API
+credentials are read from environment variables, and the local script
+serializes concurrent runs so a second build waits for the active one.
+
+The Windows machine still needs a prepared xcross Darwin SDK and toolchains.
+This is a native Windows workflow: no macOS, Xcode, Mac runner, Codemagic or
+remote Mac is used.
+
+### Quick TestFlight run on Windows
+
+From the root of a Flutter project, copy tool/testflight.ps1 from this fork
+and keep the following values outside Git:
+
+~~~powershell
+$env:XCROSS_ASC_ISSUER_ID = '<issuer-uuid>'
+$env:XCROSS_ASC_KEY_ID = '<key-id>'
+$env:XCROSS_ASC_PRIVATE_KEY = 'C:\secrets\AuthKey_<key-id>.p8'
+
+.\tool\testflight.ps1 -Build -Upload -WaitForProcessing
+~~~
+
+The build command uses xcross flutter build ipa --release --ipa
+--target-platform iphone --app-store. To upload an IPA that was built
+earlier, pass -IpaPath and omit -Build:
+
+~~~powershell
+.\tool\testflight.ps1 -IpaPath .\build\xcross-ios\MyApp.ipa -Upload -WaitForProcessing
+~~~
+
+For a widget, share extension or other .appex, register the extension Bundle
+ID in App Store Connect and attach the same App Group/capabilities there
+before the first App Store signing run. Apple's public API can register Bundle
+IDs, certificates and profiles, but it cannot create or attach App Groups.
+The API key therefore needs permission to manage identifiers and certificates;
+App Groups must already exist and be linked.
+
+For a queued GitHub Actions example on a self-hosted Windows runner, see
+docs/windows-testflight.yml. The runner must already have xcross, Flutter,
+Swift, LLVM and the private Darwin SDK installed. The workflow uses
+cancel-in-progress: false, so pushes wait instead of cancelling an active
+TestFlight build.
+
 | Feature | Details |
 |---|---|
 | **Native Windows & Linux** | Runs directly on the host with official Swift and LLVM toolchains - no VM, no WSL, no macOS anywhere |

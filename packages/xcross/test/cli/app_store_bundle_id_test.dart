@@ -64,4 +64,46 @@ void main() {
     writeBundleId(null);
     await expectLater(verify('com.example.app'), throwsA(isA<XcrossError>()));
   });
+
+  void writeExtension(String name, String? id) {
+    final extensionPath = p.join(appPath, 'PlugIns', '$name.appex');
+    Directory(extensionPath).createSync(recursive: true);
+    File(p.join(extensionPath, 'Info.plist')).writeAsStringSync(
+      '<plist><dict>'
+      '${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}'
+      '</dict></plist>',
+    );
+  }
+
+  test('discovers each embedded extension Bundle ID', () {
+    writeExtension('Share', 'com.example.app.share');
+    writeExtension('Widget', 'com.example.app.widget');
+
+    expect(
+      AppStoreIpaSigningOperation.embeddedExtensions(
+        appPath: appPath,
+        fileSystem: host.fileSystem,
+        paths: host.paths,
+      ),
+      {
+        'com.example.app.share': p.join(appPath, 'PlugIns', 'Share.appex'),
+        'com.example.app.widget': p.join(appPath, 'PlugIns', 'Widget.appex'),
+      },
+    );
+  });
+
+  test('rejects an embedded extension without Info.plist', () {
+    Directory(
+      p.join(appPath, 'PlugIns', 'Widget.appex'),
+    ).createSync(recursive: true);
+
+    expect(
+      () => AppStoreIpaSigningOperation.embeddedExtensions(
+        appPath: appPath,
+        fileSystem: host.fileSystem,
+        paths: host.paths,
+      ),
+      throwsA(isA<XcrossError>()),
+    );
+  });
 }

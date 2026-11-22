@@ -1,0 +1,61 @@
+# Copy this file to .github/workflows/windows-testflight.yml in a Flutter
+# project together with tool/testflight.ps1.
+#
+# The runner is intentionally self-hosted: the iOS SDK is an Apple-provided
+# artifact and must already be installed in the private xcross SDK location.
+# No macOS, Xcode, Mac runner or remote build service is used.
+
+name: Windows TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# A later push waits for the active build/upload. It never cancels it.
+concurrency:
+  group: windows-testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-upload:
+    runs-on: [self-hosted, Windows, xcross-ios]
+    timeout-minutes: 180
+    env:
+      XCROSS_ASC_ISSUER_ID: ${{ secrets.XCROSS_ASC_ISSUER_ID }}
+      XCROSS_ASC_KEY_ID: ${{ secrets.XCROSS_ASC_KEY_ID }}
+      XCROSS_ASC_PRIVATE_KEY_CONTENT: ${{ secrets.XCROSS_ASC_PRIVATE_KEY_CONTENT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare App Store Connect key
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:XCROSS_ASC_PRIVATE_KEY_CONTENT)) {
+            throw 'XCROSS_ASC_PRIVATE_KEY_CONTENT secret is missing'
+          }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'xcross-asc-auth-key.p8'
+          [IO.File]::WriteAllText($keyPath, $env:XCROSS_ASC_PRIVATE_KEY_CONTENT)
+          "XCROSS_ASC_PRIVATE_KEY=$keyPath" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build, upload and wait for processing
+        shell: pwsh
+        run: .\tool\testflight.ps1 -Build -Upload -WaitForProcessing
+
+      - name: Remove temporary private key
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          if ($env:XCROSS_ASC_PRIVATE_KEY) {
+            Remove-Item -LiteralPath $env:XCROSS_ASC_PRIVATE_KEY -Force
+          }
