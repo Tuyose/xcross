@@ -54,6 +54,7 @@ final class AppStoreIpaSigningOperation<T extends PlatformHostInterface> {
     final host = runtime.host;
     final hostServices = runtime.appleHostServices;
     final paths = host.paths.context;
+    final hostPaths = host.paths;
     final fs = host.fileSystem;
 
     await verifyBundleId(
@@ -108,9 +109,13 @@ final class AppStoreIpaSigningOperation<T extends PlatformHostInterface> {
     final keyExists = fs.file(keyPath).existsSync();
     final stateExists = fs.file(statePath).existsSync();
     final profilePaths = <String, String>{
-      bundleId: _profilePath(identity.profilesDir, bundleId, paths),
+      bundleId: _profilePath(identity.profilesDir, bundleId, hostPaths),
       for (final extension in extensions.entries)
-        extension.key: _profilePath(identity.profilesDir, extension.key, paths),
+        extension.key: _profilePath(
+          identity.profilesDir,
+          extension.key,
+          hostPaths,
+        ),
     };
     final anyProfileExists = profilePaths.values.any(
       (path) => fs.file(path).existsSync(),
