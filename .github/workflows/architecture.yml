@@ -27,7 +27,9 @@ jobs:
         working-directory: tool/repo_analyzer
         run: dart test
       - name: Enforce architecture with the repo analyzer plugin
-        run: dart analyze --fatal-warnings --format=machine > architecture-report.txt
+        run: |
+          set -o pipefail
+          dart analyze --fatal-warnings --format=machine | tee architecture-report.txt
       - name: Test CI security and headless smoke helpers
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Upload architecture report
