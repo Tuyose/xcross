@@ -590,7 +590,7 @@ void main() {
         if (request.method == 'GET' && path == '/v1/bundleIds') {
           if (request.url.queryParameters['filter[identifier]'] ==
               'com.example.unregistered') {
-            return http.Response(jsonEncode({'data': []}), 200);
+            return http.Response(jsonEncode({'data': const <Object?>[]}), 200);
           }
           return http.Response(
             jsonEncode({

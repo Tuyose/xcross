@@ -3,8 +3,6 @@
 /// API key - no interactive Apple ID / GrandSlam login.
 library;
 
-export 'build_upload.dart';
-
 import 'dart:convert';
 import 'dart:math';
 
@@ -16,6 +14,8 @@ import 'package:apple_developer_kit/shared/errors/errors.dart';
 import 'package:apple_developer_kit/src/shared/appstoreconnect/asc_csr.dart';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:meta/meta.dart';
+
+export 'build_upload.dart';
 
 /// Where [AscProvisioning.provisionDevelopmentIdentity] left the three files
 /// a signer needs.

@@ -23,12 +23,12 @@ void main() {
 
   void writeBundleId(String? id) {
     File(p.join(appPath, 'Info.plist')).writeAsStringSync(
-      '<?xml version="1.0" encoding="UTF-8"?>'
-      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-      '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-      '<plist version="1.0"><dict>'
-      '${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}'
-      '</dict></plist>',
+      '''
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}
+</dict></plist>''',
     );
   }
 
@@ -72,17 +72,17 @@ void main() {
     final extensionPath = p.join(appPath, 'PlugIns', '$name.appex');
     Directory(extensionPath).createSync(recursive: true);
     File(p.join(extensionPath, 'Info.plist')).writeAsStringSync(
-      '<?xml version="1.0" encoding="UTF-8"?>'
-      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-      '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-      '<plist version="1.0"><dict>'
-      '${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}'
-      '</dict></plist>',
+      '''
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+${id == null ? '' : '<key>CFBundleIdentifier</key><string>$id</string>'}
+</dict></plist>''',
     );
   }
 
   String comparablePath(String path) {
-    const windowsDevicePrefix = '\\\\?\\';
+    const windowsDevicePrefix = r'\\?\';
     if (Platform.isWindows && path.startsWith(windowsDevicePrefix)) {
       return path.substring(windowsDevicePrefix.length);
     }

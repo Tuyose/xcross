@@ -74,11 +74,10 @@ final class AscBuildUploadResult {
 final class AscBuildUploadClient {
   AscBuildUploadClient(
     this.credentials, {
-    http.Client? httpClient,
+    required http.Client httpClient,
     this.maxConcurrentOperations = 4,
     this.maxAttempts = 3,
-  }) : _http = httpClient ?? http.Client(),
-       _ownsHttp = httpClient == null {
+  }) : _http = httpClient {
     if (maxConcurrentOperations < 1) {
       throw ArgumentError.value(
         maxConcurrentOperations,
@@ -97,7 +96,6 @@ final class AscBuildUploadClient {
 
   final AscCredentials credentials;
   final http.Client _http;
-  final bool _ownsHttp;
   final int maxConcurrentOperations;
   final int maxAttempts;
 
@@ -226,7 +224,7 @@ final class AscBuildUploadClient {
   }
 
   void close() {
-    if (_ownsHttp) _http.close();
+    _http.close();
   }
 
   Future<String> _findOrCreateBuildUpload({
@@ -319,7 +317,7 @@ final class AscBuildUploadClient {
         final response = await responseFuture;
         final body = await response.stream.bytesToString();
         if (response.statusCode >= 200 && response.statusCode < 300) return;
-        throw _UploadHttpError(response.statusCode, body);
+        throw UploadHttpError(response.statusCode, body);
       } on Object catch (error) {
         lastError = error;
         if (attempt == maxAttempts || !_retryable(error)) rethrow;
@@ -430,11 +428,11 @@ final class AscBuildUploadClient {
   static bool _retryable(Object error) =>
       error is SocketException ||
       error is TimeoutException ||
-      (error is _UploadHttpError &&
+      (error is UploadHttpError &&
           const {408, 429, 500, 502, 503, 504}.contains(error.statusCode));
 
   static Future<String> _md5(File file) async {
-    final sink = _DigestResultSink();
+    final sink = DigestResultSink();
     final converter = md5.startChunkedConversion(sink);
     await for (final chunk in file.openRead()) {
       converter.add(chunk);
@@ -460,7 +458,7 @@ final class AscBuildUploadStatus {
   bool get isFailed => uploadState == 'FAILED' || processingState == 'INVALID';
 }
 
-final class _DigestResultSink implements Sink<Digest> {
+final class DigestResultSink implements Sink<Digest> {
   Digest? _result;
 
   Digest get value => _result ?? (throw StateError('MD5 digest is missing'));
@@ -472,8 +470,8 @@ final class _DigestResultSink implements Sink<Digest> {
   void close() {}
 }
 
-final class _UploadHttpError implements Exception {
-  const _UploadHttpError(this.statusCode, this.body);
+final class UploadHttpError implements Exception {
+  const UploadHttpError(this.statusCode, this.body);
 
   final int statusCode;
   final String body;

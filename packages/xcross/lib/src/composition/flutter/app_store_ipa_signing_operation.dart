@@ -8,10 +8,10 @@ import 'package:apple_developer_kit/shared/signing/signing_asset.dart';
 import 'package:cli_kit/shared/platform/platform_host.dart';
 import 'package:meta/meta.dart';
 import 'package:xcross/src/shared/artifact/app_entitlements.dart';
-import 'package:xcross/src/shared/flutter/build/bundle_entitlements.dart';
 import 'package:xcross/src/shared/artifact/plist_mutations.dart';
 import 'package:xcross/src/shared/auth/signing_session.dart';
 import 'package:xcross/src/shared/errors/errors.dart';
+import 'package:xcross/src/shared/flutter/build/bundle_entitlements.dart';
 import 'package:xcross/src/shared/runtime/xcross_runtime.dart';
 import 'package:xcross/src/target/iphone/device/signed_bundle_preparer.dart';
 

@@ -264,7 +264,6 @@ final class BundleEntitlements {
   /// Parses a plist file's [bytes]: binary (`bplist00`) or XML, tolerating
   /// the UTF-8 byte-order mark Windows editors prepend (the XML reader
   /// rejects it). CRLF line endings are handled by the XML reader itself.
-  @visibleForTesting
   static Object parsePlist(Uint8List bytes) {
     const binaryMagic = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74]; // bplist
     if (bytes.length >= binaryMagic.length &&
