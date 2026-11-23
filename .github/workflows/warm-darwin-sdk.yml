@@ -14,6 +14,9 @@ on:
         required: false
         default: ''
         type: string
+  push:
+    paths:
+      - .github/workflows/warm-darwin-sdk.yml
 
 permissions:
   contents: read
@@ -32,6 +35,7 @@ env:
 jobs:
   warm-cache:
     name: Warm ${{ matrix.os }} cache
+    if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       actions: write
