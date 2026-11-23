@@ -54,9 +54,26 @@ void main() {
         child.stdout.transform(const SystemEncoding().decoder),
         child.stderr.transform(const SystemEncoding().decoder),
       ]).transform(const LineSplitter());
-      final banner = await output
-          .firstWhere((l) => l.contains('listening on'))
-          .timeout(const Duration(seconds: 30));
+      // Keep draining both pipes after the banner. Cancelling a firstWhere
+      // subscription here can fill a Windows child-process pipe and abort the
+      // VM service socket before the client connects.
+      final bannerReady = Completer<String>();
+      final outputSubscription = output.listen(
+        (line) {
+          if (!bannerReady.isCompleted && line.contains('listening on')) {
+            bannerReady.complete(line);
+          }
+        },
+        onError: (Object error, StackTrace stack) {
+          if (!bannerReady.isCompleted) {
+            bannerReady.completeError(error, stack);
+          }
+        },
+      );
+      addTearDown(outputSubscription.cancel);
+      final banner = await bannerReady.future.timeout(
+        const Duration(seconds: 30),
+      );
       final httpUri = Uri.parse(
         RegExp(r'(http://\S+)').firstMatch(banner)!.group(1)!,
       );
