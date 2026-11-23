@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:async/async.dart';
 import 'package:cli_kit/host/linux/linux_host.dart';
 import 'package:cli_kit/shared/http/local_http.dart';
 import 'package:test/test.dart';
@@ -47,9 +48,11 @@ void main() {
     addTearDown(() => child.kill(ProcessSignal.sigkill));
 
     // "The Dart VM service is listening on http://127.0.0.1:<port>/"
-    final banner = await child.stdout
-        .transform(const SystemEncoding().decoder)
-        .transform(const LineSplitter())
+    final output = StreamGroup.merge([
+      child.stdout.transform(const SystemEncoding().decoder),
+      child.stderr.transform(const SystemEncoding().decoder),
+    ]).transform(const LineSplitter());
+    final banner = await output
         .firstWhere((l) => l.contains('listening on'))
         .timeout(const Duration(seconds: 30));
     final httpUri = Uri.parse(
