@@ -21,7 +21,7 @@ No Mac. No Xcode. No WSL.
 
 xcross reimplements the Flutter iOS build pipeline and the iOS 17+ CoreDevice launch protocol in pure Dart. It compiles your Flutter app with the official Swift and LLVM toolchains, signs it with your Apple ID or an App Store Connect API key, installs it on a physical iPhone, launches it, and gives you full hot reload - all from a Windows or Linux machine.
 
-## Windows App Store and TestFlight path
+## Windows and Linux App Store and TestFlight path
 
 This fork also carries the Windows distribution path that is useful when a
 project has SwiftPM plugins or embedded app extensions:
@@ -36,8 +36,8 @@ project has SwiftPM plugins or embedded app extensions:
 - signs the host app and every direct PlugIns/*.appex with its own App ID,
   App Store profile and entitlements;
 - uploads an already signed IPA through Apple's official Build Upload API with
-  tool/testflight.ps1, including upload-operation handling, MD5 commit and
-  optional processing polling.
+  tool/testflight.ps1 or xcross-testflight, including upload-operation
+  handling, MD5 commit and optional processing polling.
 
 The pipeline is project-independent. It does not contain a certificate,
 private key, provisioning profile or bundle ID. App Store Connect API
@@ -91,9 +91,9 @@ xcross-testflight --project . --ipa build/xcross-ios/MyApp.ipa --upload --wait
 
 The first App Store Distribution run may contact Apple to create the
 certificate and profiles. Later runs reuse the cached identity and profiles;
-an upload-only retry skips the build and signing stages. The local pipeline lock and the GitHub
-Actions `cancel-in-progress: false` setting make a later commit wait for the
-active build instead of cancelling it.
+an upload-only retry skips the build and signing stages. The local pipeline
+lock and the GitHub Actions `cancel-in-progress: false` setting make a later
+commit wait for the active build instead of cancelling it.
 
 For a widget, share extension or other .appex, register the extension Bundle
 ID in App Store Connect and attach the same App Group/capabilities there
