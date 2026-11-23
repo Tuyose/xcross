@@ -14,12 +14,16 @@ abstract final class DistributionCertificateValidator {
     );
 
     final privateKey = parsePrivateKey(privateKeyPem, 'distribution-key.pem');
+    final privatePublicExponent = parsePrivateKeyPublicExponent(
+      privateKeyPem,
+      'distribution-key.pem',
+    );
 
     final publicKey = certificate.publicKey;
 
     if (publicKey == null ||
         privateKey.modulus != publicKey.modulus ||
-        privateKey.publicExponent != publicKey.publicExponent) {
+        privatePublicExponent != publicKey.publicExponent) {
       throw const AppleError(
         'Distribution private key does not match certificate.',
       );

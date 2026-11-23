@@ -443,7 +443,7 @@ try {
   }
   Write-Host "App Store Connect app id: $appId"
 
-  $upload = Invoke-AscApi -Method POST -Path '/buildUploads' -Jwt $jwt -Body @{
+  $buildUploadBody = @{
     data = @{
       type = 'buildUploads'
       attributes = @{
@@ -456,8 +456,36 @@ try {
       }
     }
   }
-  $uploadId = [string]$upload.data.id
-  Write-Host "Build upload reservation: $uploadId"
+
+  $shortVersionQuery = [Uri]::EscapeDataString([string]$metadata.ShortVersion)
+  $buildNumberQuery = [Uri]::EscapeDataString([string]$metadata.BuildVersion)
+  $existing = Invoke-AscApi `
+    -Method GET `
+    -Path "/apps/$appId/buildUploads?filter%5BcfBundleVersion%5D=$buildNumberQuery&filter%5BcfBundleShortVersionString%5D=$shortVersionQuery&limit=20" `
+    -Jwt $jwt
+  $existingUploads = @($existing.data | Where-Object {
+    $stateValue = $_.attributes.state
+    $state = if ($stateValue -is [string]) { [string]$stateValue } else { [string]$stateValue.state }
+    $state -eq 'AWAITING_UPLOAD' -and
+      [string]$_.attributes.cfBundleVersion -eq [string]$metadata.BuildVersion -and
+      [string]$_.attributes.cfBundleShortVersionString -eq [string]$metadata.ShortVersion
+  })
+  if ($existingUploads.Count -gt 1) {
+    throw 'Aynı version için birden fazla AWAITING_UPLOAD BuildUpload var.'
+  }
+  if ($existingUploads.Count -eq 1) {
+    $uploadId = [string]$existingUploads[0].id
+    Write-Host "Existing build upload reservation resumed: $uploadId"
+  } else {
+    $buildUploadReservation = Invoke-AscApi `
+      -Method POST `
+      -Path '/buildUploads' `
+      -Jwt $jwt `
+      -Body $buildUploadBody
+    $uploadId = [string]$buildUploadReservation.data.id
+    if ([string]::IsNullOrWhiteSpace($uploadId)) { throw 'Build upload reservation ID alınamadı.' }
+    Write-Host "Build upload reservation: $uploadId"
+  }
 
   $ipaItem = Get-Item -LiteralPath $IpaPath
   $fileReservation = Invoke-AscApi -Method POST -Path '/buildUploadFiles' -Jwt $jwt -Body @{
@@ -488,7 +516,12 @@ try {
     data = @{
       type = 'buildUploadFiles'
       id = $fileId
-      attributes = @{ uploaded = $true; sourceFileChecksum = $md5 }
+      attributes = @{
+        uploaded = $true
+        sourceFileChecksums = @{
+          file = @{ hash = $md5; algorithm = 'MD5' }
+        }
+      }
     }
   })
   Write-Host 'Binary upload committed to App Store Connect.'

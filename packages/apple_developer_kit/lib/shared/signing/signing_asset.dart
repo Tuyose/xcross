@@ -30,6 +30,10 @@ class SigningAsset {
     @visibleForTesting List<Uint8List> trustedRootCertificates = const [],
   }) {
     final privateKey = parsePrivateKey(keyPem, privateKeyPemPath);
+    final privatePublicExponent = parsePrivateKeyPublicExponent(
+      keyPem,
+      privateKeyPemPath,
+    );
     final certificate = parseCertificatePem(certificatePem, certificatePemPath);
     final profileContent = parseProfileCms(profileCms, provisioningProfilePath);
     final profile = parsePlist(profileContent.plist, provisioningProfilePath);
@@ -37,6 +41,7 @@ class SigningAsset {
 
     _requireKeyMatchesCertificate(
       privateKey,
+      privatePublicExponent,
       certificate,
       privateKeyPemPath,
       certificatePemPath,
@@ -153,12 +158,13 @@ class SigningAsset {
   /// Refuses a key and certificate that do not describe the same RSA pair.
   static void _requireKeyMatchesCertificate(
     RSAPrivateKey privateKey,
+    BigInt privatePublicExponent,
     ParsedCertificate certificate,
     String privateKeyPemPath,
     String certificatePemPath,
   ) {
     if (privateKey.modulus != certificate.publicKey!.modulus ||
-        privateKey.publicExponent != certificate.publicKey!.publicExponent) {
+        privatePublicExponent != certificate.publicKey!.publicExponent) {
       throw AppleError(
         'RSA private key "$privateKeyPemPath" does not match certificate '
         '"$certificatePemPath".',

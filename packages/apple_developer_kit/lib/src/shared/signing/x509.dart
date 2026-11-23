@@ -124,6 +124,69 @@ RSAPrivateKey parsePrivateKey(String pem, String path) {
   }
 }
 
+/// Reads the RSA public exponent encoded in an imported private-key PEM.
+///
+/// Some PKCS#8 keys issued by Apple's portal contain valid RSA CRT
+/// parameters whose public exponent cannot be safely recovered by the
+/// pointycastle compatibility object used by [parsePrivateKey].  The DER
+/// encoding already carries the authoritative public exponent, so signing
+/// validation must compare that value directly instead of deriving it.
+@internal
+@useResult
+BigInt parsePrivateKeyPublicExponent(String pem, String path) {
+  try {
+    final decoded = _decodePem(pem);
+    final BigInt exponent;
+    switch (decoded.label) {
+      case 'PRIVATE KEY':
+        final root = Der.single(
+          decoded.bytes,
+          DerTag.sequence,
+          'PKCS#8 private key',
+        ).reader();
+        root.read(DerTag.integer, 'PKCS#8 version');
+        root.read(DerTag.sequence, 'PKCS#8 algorithm');
+        final privateKey = root.read(
+          DerTag.octetString,
+          'PKCS#8 private key data',
+        );
+        root.requireDone('PKCS#8 private key');
+        final rsa = Der.single(
+          privateKey.value,
+          DerTag.sequence,
+          'PKCS#1 private key',
+        ).reader();
+        rsa.read(DerTag.integer, 'PKCS#1 version');
+        rsa.read(DerTag.integer, 'RSA modulus');
+        exponent = Der.positiveInteger(
+          rsa.read(DerTag.integer, 'RSA public exponent'),
+          'RSA public exponent',
+        );
+      case 'RSA PRIVATE KEY':
+        final rsa = Der.single(
+          decoded.bytes,
+          DerTag.sequence,
+          'PKCS#1 private key',
+        ).reader();
+        rsa.read(DerTag.integer, 'PKCS#1 version');
+        rsa.read(DerTag.integer, 'RSA modulus');
+        exponent = Der.positiveInteger(
+          rsa.read(DerTag.integer, 'RSA public exponent'),
+          'RSA public exponent',
+        );
+      default:
+        throw AppleError(
+          'Unsupported private key algorithm in "$path"; RSA PEM is required.',
+        );
+    }
+    return exponent;
+  } on AppleError {
+    rethrow;
+  } on Object catch (error) {
+    throw AppleError('Malformed RSA private key "$path": $error');
+  }
+}
+
 /// Parses the leaf certificate, requiring an RSA public key and a subject
 /// common name (which becomes the designated requirement's subject).
 @internal
