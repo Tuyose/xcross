@@ -867,9 +867,9 @@ jobs:
   flutter-aot-run:
     name: Run cross-built precompiled apps (Mac Catalyst)
     needs: [gate, flutter-build]
-    if: >-
-      ${{ !cancelled() && needs.gate.outputs.run == 'true' &&
-      needs.gate.outputs.trusted == 'true' }}
+    # Disabled for the Windows/Linux-only CI contract. Running these artifacts
+    # requires a Mac Catalyst/Xcode host, which is intentionally out of scope.
+    if: false
     permissions:
       contents: read
       actions: read
@@ -920,9 +920,9 @@ jobs:
   flutter-aot-parity:
     name: Flutter AOT parity
     needs: [gate, flutter-build, flutter-aot-reference]
-    if: >-
-      ${{ !cancelled() && needs.gate.outputs.run == 'true' &&
-      needs.gate.outputs.trusted == 'true' }}
+    # Disabled with the macOS reference job; Windows/Linux builds remain gated
+    # by the cross-host Flutter jobs above.
+    if: false
     permissions:
       contents: read
       actions: read
@@ -1013,7 +1013,7 @@ jobs:
   flutter-aot-reference:
     name: Flutter AOT reference (macOS)
     needs: gate
-    if: needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true'
+    if: false
     permissions:
       contents: read
     runs-on: macos-15
@@ -1069,7 +1069,7 @@ jobs:
   flutter-simulator:
     name: Flutter ARM64 iOS Simulator
     needs: gate
-    if: needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true'
+    if: false
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -1212,9 +1212,7 @@ jobs:
   flutter-example-simulator-run:
     name: Run cross-built Flutter example on simulator (${{ matrix.host }})
     needs: [gate, flutter-build]
-    if: >-
-      ${{ !cancelled() && needs.gate.outputs.run == 'true' &&
-      needs.gate.outputs.trusted == 'true' }}
+    if: false
     permissions:
       contents: read
       actions: read
@@ -1367,7 +1365,7 @@ jobs:
   compose-simulator:
     name: Compose ARM64 iOS Simulator
     needs: gate
-    if: needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true'
+    if: false
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -1890,7 +1888,7 @@ jobs:
     name: Simulator report
     # Waits on every test job so the report can list all failed jobs.
     needs: [gate, flutter-build, flutter-simulator, flutter-example-simulator-run, compose-simulator, compose-build, native-host]
-    if: ${{ !cancelled() && needs.gate.outputs.trusted == 'true' }}
+    if: false
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1927,7 +1925,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04-arm, macos-15]
+        os: [ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
 
@@ -2021,7 +2019,7 @@ jobs:
 
   verdict:
     name: Verdict
-    needs: [gate, flutter-build, flutter-aot-reference, flutter-aot-parity, flutter-aot-run, flutter-simulator, flutter-example-simulator-run, native-host, simulator-report]
+    needs: [gate, flutter-build, native-host]
     if: ${{ always() && needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
@@ -2047,7 +2045,7 @@ jobs:
 
   compose-verdict:
     name: Compose verdict
-    needs: [gate, compose-build, compose-simulator, simulator-report]
+    needs: [gate, compose-build]
     if: ${{ always() && needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
