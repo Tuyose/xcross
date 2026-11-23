@@ -187,6 +187,30 @@ void main() {
     },
   );
 
+  test('surfaces Stderr streamId from streamNotify params', () async {
+    final ws = await socket;
+    final event = client.events.first;
+
+    ws.add(
+      jsonEncode({
+        'jsonrpc': '2.0',
+        'method': 'streamNotify',
+        'params': {
+          'streamId': 'Stderr',
+          'event': {
+            'kind': 'WriteEvent',
+            'bytes': base64Encode([66]),
+          },
+        },
+      }),
+    );
+
+    expect(
+      (await event.timeout(const Duration(seconds: 5)))['streamId'],
+      'Stderr',
+    );
+  });
+
   test('a call with no reply times out with an FlutterBuildError', () async {
     // Peer never answers 'someMethodNobodyAnswers' on purpose.
     await expectLater(
