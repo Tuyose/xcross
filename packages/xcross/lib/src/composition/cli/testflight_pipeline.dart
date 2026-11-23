@@ -10,9 +10,11 @@ import 'package:archive/archive_io.dart';
 import 'package:args/args.dart';
 import 'package:cli_kit/composition/native_host.dart';
 import 'package:http/http.dart' as http;
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:propertylistserialization/propertylistserialization.dart';
 
+@internal
 Future<void> runTestflight(List<String> arguments) async {
   final parser = ArgParser()
     ..addOption('project', defaultsTo: Directory.current.path)
@@ -281,11 +283,13 @@ AppleHostServices _hostServices(NativeHostSnapshot snapshot) =>
       permissions: NoopPermissions(),
     );
 
+@internal
 final class NoopMachineIdentity implements MachineIdentityProvider {
   @override
   Future<String> read() async => '';
 }
 
+@internal
 final class NoopPermissions implements AppleFilePermissions {
   @override
   void harden(String path) {}
@@ -294,6 +298,7 @@ final class NoopPermissions implements AppleFilePermissions {
   void preserve(String path, int mode) {}
 }
 
+@internal
 final class IpaMetadata {
   const IpaMetadata({
     required this.bundleId,

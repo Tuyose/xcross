@@ -15,8 +15,6 @@ import 'package:apple_developer_kit/src/shared/appstoreconnect/asc_csr.dart';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:meta/meta.dart';
 
-export 'build_upload.dart';
-
 /// Where [AscProvisioning.provisionDevelopmentIdentity] left the three files
 /// a signer needs.
 @immutable
