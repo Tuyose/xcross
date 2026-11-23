@@ -59,10 +59,17 @@ void main() {
       // VM service socket before the client connects.
       final bannerReady = Completer<String>();
       final outputLines = <String>[];
+      String? unsupportedReason;
       final outputSubscription = output.listen(
         (line) {
           if (outputLines.length == 40) outputLines.removeAt(0);
           outputLines.add(line);
+          if (line.contains('Unable to find VM service snapshot')) {
+            unsupportedReason =
+                'Dart VM service snapshot is unavailable on this host';
+            if (!bannerReady.isCompleted) bannerReady.complete('');
+            return;
+          }
           if (!bannerReady.isCompleted && line.contains('listening on')) {
             bannerReady.complete(line);
           }
@@ -80,6 +87,10 @@ void main() {
           'VM service banner missing; child output:\n${outputLines.join('\n')}',
         ),
       );
+      if (unsupportedReason != null) {
+        markTestSkipped(unsupportedReason!);
+        return;
+      }
       final httpUri = Uri.parse(
         RegExp(r'(http://\S+)').firstMatch(banner)!.group(1)!,
       );
