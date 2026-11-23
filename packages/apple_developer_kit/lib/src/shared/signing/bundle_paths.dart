@@ -48,6 +48,7 @@ bool isWithinOrEqual(
   required AppleHostServices hostServices,
 }) {
   final services = hostServices;
-  return samePath(parent, child, hostServices: services) ||
-      services.host.paths.context.isWithin(parent, child);
+  final equal = samePath(parent, child, hostServices: services);
+  if (equal) return true;
+  return services.host.paths.context.isWithin(parent, child);
 }
