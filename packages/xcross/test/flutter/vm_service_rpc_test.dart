@@ -189,6 +189,7 @@ void main() {
 
   test('surfaces Stderr streamId from streamNotify params', () async {
     final ws = await socket;
+    addTearDown(ws.close);
     final event = client.events.first;
 
     ws.add(
