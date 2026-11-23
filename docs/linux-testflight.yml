@@ -1,0 +1,54 @@
+# Copy this file to .github/workflows/linux-testflight.yml in a Flutter
+# project together with the installed xcross-testflight executable.
+#
+# The runner is intentionally self-hosted. No macOS, Xcode, Mac runner or
+# remote build service is used.
+
+name: Linux TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-upload:
+    runs-on: [self-hosted, Linux, xcross-ios]
+    timeout-minutes: 180
+    env:
+      XCROSS_ASC_ISSUER_ID: ${{ secrets.XCROSS_ASC_ISSUER_ID }}
+      XCROSS_ASC_KEY_ID: ${{ secrets.XCROSS_ASC_KEY_ID }}
+      XCROSS_ASC_PRIVATE_KEY: ${{ runner.temp }}/xcross-asc-auth-key.p8
+      XCROSS_ASC_APP_ID: ${{ secrets.XCROSS_ASC_APP_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare App Store Connect key
+        shell: bash
+        env:
+          XCROSS_ASC_PRIVATE_KEY_CONTENT: ${{ secrets.XCROSS_ASC_PRIVATE_KEY_CONTENT }}
+        run: |
+          set -euo pipefail
+          test -n "$XCROSS_ASC_PRIVATE_KEY_CONTENT"
+          umask 077
+          printf '%s' "$XCROSS_ASC_PRIVATE_KEY_CONTENT" > "$XCROSS_ASC_PRIVATE_KEY"
+
+      - name: Build, upload and wait for processing
+        shell: bash
+        run: xcross-testflight --project . --build --upload --wait
+
+      - name: Remove temporary private key
+        if: always()
+        shell: bash
+        run: rm -f -- "$XCROSS_ASC_PRIVATE_KEY"

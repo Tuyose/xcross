@@ -266,37 +266,6 @@ function Convert-UploadHeaders {
   return $result
 }
 
-function Read-FileRange {
-  param(
-    [Parameter(Mandatory = $true)][string]$Path,
-    [Parameter(Mandatory = $true)][Int64]$Offset,
-    [Parameter(Mandatory = $true)][Int64]$Length
-  )
-
-  if ($Length -gt [Int32]::MaxValue) {
-    throw "Apple upload operation is too large for Windows PowerShell: $Length bytes"
-  }
-  $stream = New-Object System.IO.FileStream(
-    $Path,
-    [System.IO.FileMode]::Open,
-    [System.IO.FileAccess]::Read,
-    [System.IO.FileShare]::Read
-  )
-  try {
-    [void]$stream.Seek($Offset, [System.IO.SeekOrigin]::Begin)
-    $bytes = New-Object byte[] ([int]$Length)
-    $read = 0
-    while ($read -lt $bytes.Length) {
-      $count = $stream.Read($bytes, $read, $bytes.Length - $read)
-      if ($count -le 0) { throw 'IPA upload operation file aralığının sonuna ulaştı.' }
-      $read += $count
-    }
-    return $bytes
-  } finally {
-    $stream.Dispose()
-  }
-}
-
 function Send-UploadOperation {
   param(
     [Parameter(Mandatory = $true)]$Operation,
@@ -310,7 +279,6 @@ function Send-UploadOperation {
     throw "Apple upload operation aralığı geçersiz: offset=$offset length=$length size=$FileSize"
   }
 
-  $bytes = Read-FileRange -Path $Path -Offset $offset -Length $length
   $headers = Convert-UploadHeaders -Headers $Operation.requestHeaders
   $request = [System.Net.WebRequest]::Create([string]$Operation.url)
   $request.Method = if ($Operation.method) { [string]$Operation.method } else { 'PUT' }
@@ -324,9 +292,29 @@ function Send-UploadOperation {
       $request.Headers.Add($name, $headers[$name])
     }
   }
-  $request.ContentLength = $bytes.Length
+  $request.ContentLength = $length
+  $file = New-Object System.IO.FileStream(
+    $Path,
+    [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::Read,
+    [System.IO.FileShare]::Read
+  )
   $body = $request.GetRequestStream()
-  try { $body.Write($bytes, 0, $bytes.Length) } finally { $body.Dispose() }
+  try {
+    [void]$file.Seek($offset, [System.IO.SeekOrigin]::Begin)
+    $buffer = New-Object byte[] 1048576
+    $remaining = $length
+    while ($remaining -gt 0) {
+      $requested = [Math]::Min($buffer.Length, $remaining)
+      $read = $file.Read($buffer, 0, $requested)
+      if ($read -le 0) { throw 'IPA upload operation file aralığının sonuna ulaştı.' }
+      $body.Write($buffer, 0, $read)
+      $remaining -= $read
+    }
+  } finally {
+    $body.Dispose()
+    $file.Dispose()
+  }
   $response = $request.GetResponse()
   try {
     $status = [int]$response.StatusCode

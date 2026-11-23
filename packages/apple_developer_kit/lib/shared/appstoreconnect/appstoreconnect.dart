@@ -3,6 +3,8 @@
 /// API key - no interactive Apple ID / GrandSlam login.
 library;
 
+export 'build_upload.dart';
+
 import 'dart:convert';
 import 'dart:math';
 

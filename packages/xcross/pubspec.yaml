@@ -19,6 +19,7 @@ resolution: workspace
 executables:
   xcross:
   xcrun:
+  xcross-testflight: testflight
 
 dependencies:
   apple_developer_kit: ^1.0.0

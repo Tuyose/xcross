@@ -69,6 +69,32 @@ earlier, pass -IpaPath and omit -Build:
 .\tool\testflight.ps1 -IpaPath .\build\xcross-ios\MyApp.ipa -Upload -WaitForProcessing
 ~~~
 
+The same Build Upload API client is also available as the cross-platform
+`xcross-testflight` executable. It uses the same signing cache, reservation
+reuse, upload-operation retry and processing checks on Linux:
+
+~~~bash
+export XCROSS_ASC_ISSUER_ID='<issuer-uuid>'
+export XCROSS_ASC_KEY_ID='<key-id>'
+export XCROSS_ASC_PRIVATE_KEY="$HOME/.secrets/AuthKey_<key-id>.p8"
+
+xcross-testflight --project . --build --upload --wait
+~~~
+
+For either host, pass `XCROSS_ASC_APP_ID` when possible. This avoids the
+bundle-id lookup before every upload. To retry an upload without rebuilding or
+resigning, pass the already signed IPA instead:
+
+~~~bash
+xcross-testflight --project . --ipa build/xcross-ios/MyApp.ipa --upload --wait
+~~~
+
+The first App Store Distribution run may contact Apple to create the
+certificate and profiles. Later runs reuse the cached identity and profiles;
+an upload-only retry skips the build and signing stages. The local pipeline lock and the GitHub
+Actions `cancel-in-progress: false` setting make a later commit wait for the
+active build instead of cancelling it.
+
 For a widget, share extension or other .appex, register the extension Bundle
 ID in App Store Connect and attach the same App Group/capabilities there
 before the first App Store signing run. Apple's public API can register Bundle
@@ -81,6 +107,48 @@ docs/windows-testflight.yml. The runner must already have xcross, Flutter,
 Swift, LLVM and the private Darwin SDK installed. The workflow uses
 cancel-in-progress: false, so pushes wait instead of cancelling an active
 TestFlight build.
+
+For Linux, use the same labels and secrets with docs/linux-testflight.yml.
+Both examples are self-hosted because the Darwin SDK and the Apple signing
+materials must remain on the build machine; neither workflow invokes macOS,
+Xcode or a remote Mac.
+
+### What upstream xcross solves, and what this fork adds
+
+The original `arxdeus/xcross` project solves the host-side Flutter/iOS
+toolchain problem: it runs Flutter's frontend and AOT pipeline, compiles
+SwiftPM plugins with Swift/LLVM and a Darwin SDK, links iOS Mach-O binaries,
+packages `.app`/basic `.ipa` output, signs development builds, and installs or
+hot-reloads them on iOS 17+ devices through CoreDevice/RSD. It supports
+Windows and Linux without Xcode, WSL or a Mac.
+
+Its normal release path builds an unsigned bundle; development signing is the
+main integrated signing scenario. Before the fork changes, it did not provide
+the complete App Store Distribution path for a host app plus independent
+embedded `.appex` profiles, nor a complete official Build Upload API commit
+and processing workflow. App Groups also remain an Apple API limitation:
+public App Store Connect API keys cannot create or attach them; that requires
+the Apple ID/developer-services path or pre-created App Group configuration.
+
+This fork adds the distribution layer needed by real Flutter plugin projects:
+
+- Flutter release/AOT and SwiftPM packaging hardening for Windows, including
+  resource-bundle path repair and static framework compatibility stubs;
+- App Store certificate/private-key/profile/entitlement validation;
+- separate App Store signing for the host app and every direct
+  `PlugIns/*.appex` bundle;
+- version/build-number and icon/bundle metadata guards;
+- official `/v1/buildUploads` and `/v1/buildUploadFiles` upload/commit flow;
+- cross-platform streamed uploading with bounded operation concurrency and
+  retryable-network-error handling;
+- signed-IPA reuse, `AWAITING_UPLOAD` reservation reuse, local serialization
+  and queued Windows/Linux CI examples.
+
+The NOFPAD validation went beyond unit tests: a Windows-built signed IPA with
+`com.nofpad.app` and `nofpadWidgets.appex` was accepted by App Store Connect,
+processed as `VALID`, and was exercised on a real iPhone with camera and
+Firebase functionality. That proves the path for this project; it is not a
+claim that every Flutter plugin graph is automatically compatible.
 
 | Feature | Details |
 |---|---|
