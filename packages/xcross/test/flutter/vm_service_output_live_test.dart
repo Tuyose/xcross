@@ -58,8 +58,11 @@ void main() {
       // subscription here can fill a Windows child-process pipe and abort the
       // VM service socket before the client connects.
       final bannerReady = Completer<String>();
+      final outputLines = <String>[];
       final outputSubscription = output.listen(
         (line) {
+          if (outputLines.length == 40) outputLines.removeAt(0);
+          outputLines.add(line);
           if (!bannerReady.isCompleted && line.contains('listening on')) {
             bannerReady.complete(line);
           }
@@ -73,6 +76,9 @@ void main() {
       addTearDown(outputSubscription.cancel);
       final banner = await bannerReady.future.timeout(
         const Duration(seconds: 30),
+        onTimeout: () => fail(
+          'VM service banner missing; child output:\n${outputLines.join('\n')}',
+        ),
       );
       final httpUri = Uri.parse(
         RegExp(r'(http://\S+)').firstMatch(banner)!.group(1)!,
