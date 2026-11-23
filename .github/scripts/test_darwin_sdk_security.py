@@ -196,11 +196,10 @@ class WorkflowSecurityTests(unittest.TestCase):
         for filename, job_name in (("integration.yml", "flutter-simulator"), ("integration.yml", "compose-simulator")):
             with self.subTest(workflow=filename):
                 native = job((WORKFLOWS / filename).read_text(), job_name)
+                self.assertIn("if: false", native)
                 self.assertIn("runs-on: macos-15", native)
-                self.assertIn("uses: ./.github/actions/configure-xcode", native)
-                self.assertIn('xcross sdk install "$XCODE_APP"', native)
                 self.assertNotIn("secrets.", native)
-                self.assertNotIn("setup-darwin-sdk", native)
+                self.assertNotIn("continue-on-error", native)
 
     def test_warm_workflow_installs_xip_with_xcross_and_replaces_each_host_cache(self):
         source = (WORKFLOWS / "warm-darwin-sdk.yml").read_text()

@@ -2019,7 +2019,7 @@ jobs:
 
   verdict:
     name: Verdict
-    needs: [gate, flutter-build, native-host]
+    needs: [gate, flutter-build, flutter-aot-reference, flutter-aot-parity, flutter-aot-run, flutter-simulator, flutter-example-simulator-run, native-host, simulator-report]
     if: ${{ always() && needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
@@ -2045,7 +2045,7 @@ jobs:
 
   compose-verdict:
     name: Compose verdict
-    needs: [gate, compose-build]
+    needs: [gate, compose-build, compose-simulator, simulator-report]
     if: ${{ always() && needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true' }}
     runs-on: ubuntu-24.04
     permissions:

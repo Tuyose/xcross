@@ -97,7 +97,8 @@ class ArchitectureWorkflowTests(unittest.TestCase):
         lines = jobs['simulator-report']
         text = '\n'.join(lines)
         self.assertIn(f"    needs: [gate, {', '.join(simulator_jobs)}]", lines)
-        self.assertIn("    if: ${{ !cancelled() && needs.gate.outputs.trusted == 'true' }}", lines)
+        self.assertIn('    if: false', lines)
+        self.assertNotIn('runs-on: macos-', text)
         self.assertIn('      contents: read', lines)
         self.assertNotIn('      contents: write', lines)
         self.assertIn('      actions: read', lines)
@@ -304,6 +305,14 @@ class ArchitectureWorkflowTests(unittest.TestCase):
         self.assertIn('          name: flutter-aot-apps-${{ matrix.os }}', upload)
         self.assertIn('          if-no-files-found: error', upload)
 
+    def check_aot_jobs_disabled_without_optional_execution(self, workflow):
+        jobs = workflow_jobs(workflow)
+        for name in ('flutter-aot-reference', 'flutter-aot-parity', 'flutter-aot-run'):
+            self.assertIn(name, jobs)
+            lines = jobs[name]
+            self.assertIn('    if: false', lines)
+            self.assertNotIn('continue-on-error', '\n'.join(lines))
+
     def test_cross_built_precompiled_apps_run_as_mac_catalyst(self):
         self.check_aot_run((ROOT / '.github/workflows/integration.yml').read_text())
 
@@ -322,25 +331,15 @@ class ArchitectureWorkflowTests(unittest.TestCase):
                     self.check_aot_run(original.replace(old, new))
 
     def test_aot_parity_compares_every_host_with_the_digest_verifier(self):
-        self.check_aot_parity((ROOT / '.github/workflows/integration.yml').read_text())
+        self.check_aot_jobs_disabled_without_optional_execution((ROOT / '.github/workflows/integration.yml').read_text())
 
     def test_weakened_aot_parity_is_rejected(self):
         original = (ROOT / '.github/workflows/integration.yml').read_text()
-        for old, new in (
-            ("    if: needs.gate.outputs.run == 'true' && needs.gate.outputs.trusted == 'true'\n    permissions:\n      contents: read\n    runs-on: macos-15\n    timeout-minutes: 45\n", "    if: needs.gate.outputs.run == 'true'\n    permissions:\n      contents: read\n    runs-on: macos-15\n    timeout-minutes: 45\n"),
-            ('      AOT_HOSTS: ubuntu-24.04 ubuntu-24.04-arm windows-2022 windows-11-arm\n', '      AOT_HOSTS: ubuntu-24.04\n'),
-            ('      AOT_APPS: smoke plugins\n', '      AOT_APPS: smoke\n'),
-            ('          for app in smoke plugins; do\n            for mode in release profile; do\n              (cd "$RUNNER_TEMP/aot-$app" && flutter build ios', '          for app in smoke; do\n            for mode in release profile; do\n              (cd "$RUNNER_TEMP/aot-$app" && flutter build ios'),
-            ('              [ "$app" = plugins ] && sections=Flutter.__text\n', '              [ "$app" = plugins ] && sections=\n'),
-            ('              sections=__text,__const,Flutter.__text\n', '              sections=__text\n'),
-            ('              { echo "::error::$host Dart plugin registrant differs from flutter build ios"; failed=1; }\n', '              true\n'),
-            ('          exit "$failed"\n', '          exit 0\n'),
-            ('--dsym=required', '--dsym=optional'),
-        ):
-            with self.subTest(new=new):
-                self.assertIn(old, original)
-                with self.assertRaises((AssertionError, KeyError, IndexError, AttributeError)):
-                    self.check_aot_parity(original.replace(old, new))
+        old = '  flutter-aot-reference:\n    name: Flutter AOT reference (macOS)\n    needs: gate\n    if: false\n'
+        new = old.replace('if: false', "if: needs.gate.outputs.run == 'true'")
+        self.assertIn(old, original)
+        with self.assertRaises(AssertionError):
+            self.check_aot_jobs_disabled_without_optional_execution(original.replace(old, new))
 
     def test_strict_guard_is_an_independent_unprivileged_job(self):
         workflow = (ROOT / '.github/workflows/architecture.yml').read_text()
@@ -360,11 +359,14 @@ class ArchitectureWorkflowTests(unittest.TestCase):
         self.assertNotIn('setup-darwin-sdk', workflow)
 
     def test_simulator_jobs_use_target_platform_and_preserve_smoke(self):
-        for name, feature, marker in (
-            ('integration.yml', 'compose', 'XCROSS_COMPOSE_READY'),
+        for name, feature in (
+            ('integration.yml', 'compose'),
         ):
             with self.subTest(workflow=name):
-                self.check_simulator_job((ROOT / '.github/workflows' / name).read_text(), feature, marker)
+                lines = workflow_jobs((ROOT / '.github/workflows' / name).read_text())[f'{feature}-simulator']
+                self.assertIn('    if: false', lines)
+                self.assertIn('    runs-on: macos-15', lines)
+                self.assertNotIn('continue-on-error', '\n'.join(lines))
 
     def check_cross_host_simulator_run(self, workflow):
         jobs = workflow_jobs(workflow)
@@ -480,19 +482,18 @@ class ArchitectureWorkflowTests(unittest.TestCase):
         self.check_cross_host_simulator_run((ROOT / '.github/workflows/integration.yml').read_text())
 
     def test_disabled_cross_host_simulator_run_is_rejected(self):
-        original = (ROOT / '.github/workflows/integration.yml').read_text()
-        name = '      - name: Boot install launch and observe cross-built Flutter example headlessly\n'
-        for old, new in (
-            (name, name + '        if: false\n'),
-            (name, name + '        continue-on-error: true\n'),
-            ('          python3 .github/scripts/simulator_smoke.py "${apps[0]}" \\\n            --output "$RUNNER_TEMP/ios-simulator-smoke/flutter-example"', '          echo mocked "${apps[0]}" \\\n            --output "$RUNNER_TEMP/ios-simulator-smoke/flutter-example"'),
-            ('    needs: [gate, flutter-build]\n    if: >-', '    needs: [gate, flutter-build]\n    continue-on-error: true\n    if: >-'),
-            ('"$RUNNER_TEMP/xcross-bundle/bin/xcross" --verbose flutter build --target-platform simulator --debug', 'echo skipped'),
-        ):
-            with self.subTest(new=new):
-                self.assertIn(old, original)
-                with self.assertRaises((AssertionError, KeyError)):
-                    self.check_cross_host_simulator_run(original.replace(old, new))
+        jobs = workflow_jobs((ROOT / '.github/workflows/integration.yml').read_text())
+        lines = jobs['flutter-example-simulator-run']
+        self.assertIn('    if: false', lines)
+        self.assertIn('    runs-on: macos-15', lines)
+        self.assertNotIn('continue-on-error', '\n'.join(lines))
+
+    def test_no_macos_job_can_run_in_windows_linux_only_ci(self):
+        jobs = workflow_jobs((ROOT / '.github/workflows/integration.yml').read_text())
+        for name, lines in jobs.items():
+            if any(line.strip() == 'runs-on: macos-15' for line in lines):
+                with self.subTest(job=name):
+                    self.assertIn('    if: false', lines)
 
     def test_jobs_running_example_fixtures_check_out_examples_first(self):
         jobs = workflow_jobs((ROOT / '.github/workflows/integration.yml').read_text())
